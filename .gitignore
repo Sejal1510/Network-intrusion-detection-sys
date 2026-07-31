@@ -25,6 +25,11 @@ htmlcov/
 # ML experiment tracking (local runs, not source)
 mlruns/
 mlartifacts/
+mlflow.db
+mlflow.db-*
+
+# Trained run artifacts (see nids.training.artifacts)
+models/runs/
 
 # Dataset (fetched via `python -m nids.data.download`, see docs/DATASET.md)
 data/raw/*

@@ -23,10 +23,12 @@ class TrainingConfig:
     test_exclude_difficulty_21: bool = False
     label_column: str = "is_attack"
 
-    # Experiment tracking / artifact naming (see nids.training.artifacts)
+    # Experiment tracking / artifact naming (see nids.training.artifacts,
+    # nids.training.tracking)
     experiment_name: str = "nids-baseline"
     run_name: str | None = None
     artifact_root: Path = Path("models/runs")
+    tracking_uri: str = "sqlite:///mlflow.db"
 
     def __post_init__(self) -> None:
         if self.label_column not in VALID_LABEL_COLUMNS:
