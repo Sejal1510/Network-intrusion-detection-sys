@@ -1,12 +1,14 @@
 from pathlib import Path
 
 import pytest
+from mlflow.tracking import MlflowClient
 
 from nids.data import loader
 from nids.training import tuning as tuning_module
+from nids.training.artifacts import load_cv_run
 from nids.training.config import TrainingConfig
 from nids.training.search import GridSearch, RandomSearch
-from nids.training.tuning import TuningResult, search_hyperparameters
+from nids.training.tuning import TuningResult, run_hyperparameter_search, search_hyperparameters
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd_cv.txt"
 
@@ -119,3 +121,64 @@ def test_search_hyperparameters_is_deterministic_with_random_search(cv_df):
 
     assert [t.params for t in result_a.trials] == [t.params for t in result_b.trials]
     assert result_a.best_trial.score == result_b.best_trial.score
+
+
+def test_run_hyperparameter_search_saves_study_and_every_trial(cv_df, tmp_path):
+    config = TrainingConfig(
+        model_name="random_forest", cv_folds=3, artifact_root=tmp_path / "runs"
+    )
+    space = {"n_estimators": [5, 10]}
+
+    tuning_run_artifacts = run_hyperparameter_search(
+        config, space, GridSearch(), df=cv_df, log_to_mlflow=False
+    )
+
+    assert tuning_run_artifacts.run_dir.exists()
+    assert len(tuning_run_artifacts.trials) == 2
+
+    # every trial is independently loadable as a full CV run
+    for trial_summary in tuning_run_artifacts.trials:
+        trial_dir = (tmp_path / "runs") / trial_summary["run_id"]
+        loaded = load_cv_run(trial_dir)
+        assert loaded.n_folds == 3
+
+
+def test_run_hyperparameter_search_best_trial_matches_pure_computation(cv_df, tmp_path):
+    config = TrainingConfig(
+        model_name="random_forest", cv_folds=3, artifact_root=tmp_path / "runs"
+    )
+    space = {"n_estimators": [5, 10, 15]}
+
+    pure_result = search_hyperparameters(config, space, GridSearch(), df=cv_df)
+    tuning_run_artifacts = run_hyperparameter_search(
+        config, space, GridSearch(), df=cv_df, log_to_mlflow=False
+    )
+
+    assert tuning_run_artifacts.metadata["best_score"] == pytest.approx(pure_result.best_trial.score)
+    assert tuning_run_artifacts.metadata["best_params"] == pure_result.best_trial.params
+
+
+def test_run_hyperparameter_search_logs_parent_and_child_runs_to_mlflow(cv_df, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    tracking_uri = f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}"
+
+    config = TrainingConfig(
+        model_name="random_forest",
+        cv_folds=3,
+        artifact_root=tmp_path / "runs",
+        experiment_name="nids-tuning-test",
+        tracking_uri=tracking_uri,
+    )
+    space = {"n_estimators": [5, 10]}
+
+    run_hyperparameter_search(config, space, GridSearch(), df=cv_df)
+
+    client = MlflowClient(tracking_uri=tracking_uri)
+    experiment = client.get_experiment_by_name("nids-tuning-test")
+    assert experiment is not None
+
+    all_runs = client.search_runs([experiment.experiment_id])
+    parent_runs = [r for r in all_runs if r.data.tags.get("run_type") == "hyperparameter_search"]
+    child_runs = [r for r in all_runs if r.data.tags.get("run_type") == "cross_validation"]
+    assert len(parent_runs) == 1
+    assert len(child_runs) == 2

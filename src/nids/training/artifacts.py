@@ -8,12 +8,17 @@ cross-validation (`save_cv_run`/`load_cv_run`): the same config/metadata
 shape, but metrics are per-fold + aggregated rather than a single model's
 score -- there is no single fold-independent model or feature pipeline to
 save, since each fold fits its own from scratch (see
-nids.training.validation).
+nids.training.validation). For hyperparameter search
+(`save_tuning_run`/`load_tuning_run`): the base config, the search space,
+and a lightweight index of every trial (params/run_id/score) -- each
+trial is itself a full CV run, saved separately via `save_cv_run` and
+reachable in full via its `run_id`, so per-fold detail is never duplicated
+between a trial and the study that ran it.
 
-Both run types share the same directory conventions (config.json,
-metrics.json, metadata.json) and the same metadata fields wherever they
-apply, so comparing a single-split run against a cross-validation run is a
-matter of reading the same files, not learning two formats.
+All three run types share the same directory conventions (config.json,
+metrics.json or trials.json, metadata.json) and the same core metadata
+fields wherever they apply, so comparing runs of different types is a
+matter of reading the same files, not learning three formats.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from nids.models.registry import Classifier
 from nids.training.config import TrainingConfig
 
 if TYPE_CHECKING:
+    from nids.training.tuning import TuningResult
     from nids.training.validation import CVResult
 
 MODEL_FILENAME = "model.joblib"
@@ -41,6 +47,8 @@ FEATURE_PIPELINE_FILENAME = "feature_pipeline.joblib"
 CONFIG_FILENAME = "config.json"
 METRICS_FILENAME = "metrics.json"
 METADATA_FILENAME = "metadata.json"
+SEARCH_SPACE_FILENAME = "search_space.json"
+TRIALS_FILENAME = "trials.json"
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,15 @@ class CVRunArtifacts:
     n_folds: int
     fold_metrics: list[dict[str, Any]]
     aggregated_metrics: dict[str, dict[str, float]]
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TuningRunArtifacts:
+    run_dir: Path
+    base_config: TrainingConfig
+    search_space: dict[str, list[Any]]
+    trials: list[dict[str, Any]]
     metadata: dict[str, Any]
 
 
@@ -224,5 +241,79 @@ def load_cv_run(run_dir: str | Path) -> CVRunArtifacts:
         n_folds=metadata["n_folds"],
         fold_metrics=metrics_data["fold_metrics"],
         aggregated_metrics=metrics_data["aggregated_metrics"],
+        metadata=metadata,
+    )
+
+
+def save_tuning_run(run_dir: str | Path, tuning_result: TuningResult) -> TuningRunArtifacts:
+    """Write a complete, self-contained hyperparameter-search run
+    directory: the base config, the search space, a lightweight per-trial
+    summary (params/run_id/score), and metadata identifying the winner.
+
+    Each trial is *also* saved individually as its own full CV run (see
+    `save_cv_run`, called once per trial by
+    `nids.training.tuning.run_hyperparameter_search`) -- this function
+    does not duplicate that per-trial fold-level detail, it only indexes
+    it by `run_id` so the full detail is one `load_cv_run` away.
+    """
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    config = tuning_result.base_config
+
+    _write_json(run_dir / CONFIG_FILENAME, config.to_dict())
+    _write_json(run_dir / SEARCH_SPACE_FILENAME, tuning_result.search_space)
+
+    trial_summaries = [
+        {
+            "trial_index": trial.trial_index,
+            "params": trial.params,
+            "run_id": trial.config.run_name,
+            "score": trial.score,
+        }
+        for trial in tuning_result.trials
+    ]
+    _write_json(run_dir / TRIALS_FILENAME, trial_summaries)
+
+    metadata = {
+        **_base_metadata(config, run_dir.name),
+        "run_type": "hyperparameter_search",
+        "strategy_name": tuning_result.strategy_name,
+        "metric": tuning_result.metric,
+        "maximize": tuning_result.maximize,
+        "n_trials": len(tuning_result.trials),
+        "best_trial_run_id": tuning_result.best_trial.config.run_name,
+        "best_params": tuning_result.best_trial.params,
+        "best_score": tuning_result.best_trial.score,
+    }
+    _write_json(run_dir / METADATA_FILENAME, metadata)
+
+    return TuningRunArtifacts(
+        run_dir=run_dir,
+        base_config=config,
+        search_space=tuning_result.search_space,
+        trials=trial_summaries,
+        metadata=metadata,
+    )
+
+
+def load_tuning_run(run_dir: str | Path) -> TuningRunArtifacts:
+    """Reload a run directory written by `save_tuning_run` in full. Use
+    `load_cv_run(run_dir.parent / trial["run_id"])` to get a given trial's
+    full per-fold detail."""
+    run_dir = Path(run_dir)
+
+    config_data = json.loads((run_dir / CONFIG_FILENAME).read_text())
+    config_data["artifact_root"] = Path(config_data["artifact_root"])
+    base_config = TrainingConfig(**config_data)
+
+    search_space = json.loads((run_dir / SEARCH_SPACE_FILENAME).read_text())
+    trials = json.loads((run_dir / TRIALS_FILENAME).read_text())
+    metadata = json.loads((run_dir / METADATA_FILENAME).read_text())
+
+    return TuningRunArtifacts(
+        run_dir=run_dir,
+        base_config=base_config,
+        search_space=search_space,
+        trials=trials,
         metadata=metadata,
     )

@@ -19,9 +19,15 @@ from typing import Any
 import pandas as pd
 
 from nids.data import load_train
-from nids.training.artifacts import default_run_id
+from nids.training.artifacts import (
+    TuningRunArtifacts,
+    default_run_id,
+    save_cv_run,
+    save_tuning_run,
+)
 from nids.training.config import TrainingConfig
 from nids.training.search import SearchStrategy
+from nids.training.tracking import log_tuning_run
 from nids.training.validation import CVResult, run_cross_validation
 
 
@@ -120,3 +126,43 @@ def search_hyperparameters(
         trials=trials,
         best_trial=_select_best(trials, maximize),
     )
+
+
+def run_hyperparameter_search(
+    base_config: TrainingConfig,
+    search_space: dict[str, list[Any]],
+    strategy: SearchStrategy,
+    df: pd.DataFrame | None = None,
+    metric: str = "accuracy",
+    maximize: bool = True,
+    log_to_mlflow: bool = True,
+) -> TuningRunArtifacts:
+    """Run a hyperparameter search and persist + track it exactly like
+    `nids.training.run.run_training` and
+    `nids.training.validation.run_cv_training` persist + track a single
+    run -- this is the "front door" for tuning, the way those are for a
+    single split and cross-validation respectively;
+    `search_hyperparameters` above is the pure computation it wraps.
+
+    Every trial is saved as its own full cross-validation run (via
+    `save_cv_run`) in addition to the study-level summary (via
+    `save_tuning_run`), so a trial's complete per-fold detail is always on
+    disk, not just its score.
+    """
+    tuning_result = search_hyperparameters(
+        base_config, search_space, strategy, df=df, metric=metric, maximize=maximize
+    )
+
+    trial_cv_run_artifacts = [
+        save_cv_run(trial.config.artifact_root / trial.config.run_name, trial.cv_result)
+        for trial in tuning_result.trials
+    ]
+
+    tuning_run_artifacts = save_tuning_run(
+        base_config.artifact_root / tuning_result.study_run_id, tuning_result
+    )
+
+    if log_to_mlflow:
+        log_tuning_run(tuning_run_artifacts, trial_cv_run_artifacts)
+
+    return tuning_run_artifacts

@@ -7,10 +7,12 @@ from mlflow.tracking import MlflowClient
 from nids.data import loader
 from nids.features import FeatureEngineer
 from nids.models.registry import build_model
-from nids.training.artifacts import save_cv_run, save_run
+from nids.training.artifacts import save_cv_run, save_run, save_tuning_run
 from nids.training.config import TrainingConfig
 from nids.training.evaluate import evaluate_classifier
-from nids.training.tracking import log_cv_run, log_run
+from nids.training.search import GridSearch
+from nids.training.tracking import log_cv_run, log_run, log_tuning_run
+from nids.training.tuning import search_hyperparameters
 from nids.training.validation import run_cross_validation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd.txt"
@@ -152,3 +154,58 @@ def test_log_cv_run_metric_names_match_log_run_for_comparability(cv_run_artifact
 
     assert "accuracy" in cv_run.data.metrics
     assert "accuracy" in single_run.data.metrics
+
+
+@pytest.fixture
+def tuning_artifacts(tmp_path):
+    df = loader._read_nsl_kdd_file(CV_FIXTURE)
+    config = TrainingConfig(
+        model_name="random_forest",
+        cv_folds=3,
+        experiment_name="nids-test-experiment",
+        tracking_uri=_sqlite_uri(tmp_path),
+    )
+    tuning_result = search_hyperparameters(config, {"n_estimators": [5, 10]}, GridSearch(), df=df)
+
+    trial_cv_artifacts = [
+        save_cv_run(tmp_path / "runs" / trial.config.run_name, trial.cv_result)
+        for trial in tuning_result.trials
+    ]
+    tuning_run_artifacts = save_tuning_run(tmp_path / "runs" / tuning_result.study_run_id, tuning_result)
+    return tuning_run_artifacts, trial_cv_artifacts
+
+
+def test_log_tuning_run_creates_parent_and_nested_child_runs(tuning_artifacts):
+    tuning_run_artifacts, trial_cv_artifacts = tuning_artifacts
+
+    parent_run_id = log_tuning_run(tuning_run_artifacts, trial_cv_artifacts)
+
+    client = MlflowClient(tracking_uri=tuning_run_artifacts.base_config.tracking_uri)
+    parent_run = client.get_run(parent_run_id)
+
+    assert parent_run.data.tags["run_type"] == "hyperparameter_search"
+    assert parent_run.data.params["strategy_name"] == "GridSearch"
+    assert parent_run.data.metrics["best_score"] == pytest.approx(
+        tuning_run_artifacts.metadata["best_score"]
+    )
+
+    experiment_id = parent_run.info.experiment_id
+    all_runs = client.search_runs([experiment_id])
+    child_runs = [r for r in all_runs if r.data.tags.get("mlflow.parentRunId") == parent_run_id]
+    assert len(child_runs) == len(trial_cv_artifacts)
+    for child in child_runs:
+        assert child.data.tags["run_type"] == "cross_validation"
+
+
+def test_log_tuning_run_logs_study_level_artifacts(tuning_artifacts):
+    tuning_run_artifacts, trial_cv_artifacts = tuning_artifacts
+
+    parent_run_id = log_tuning_run(tuning_run_artifacts, trial_cv_artifacts)
+
+    client = MlflowClient(tracking_uri=tuning_run_artifacts.base_config.tracking_uri)
+    artifact_paths = {f.path for f in client.list_artifacts(parent_run_id)}
+
+    assert "config.json" in artifact_paths
+    assert "search_space.json" in artifact_paths
+    assert "trials.json" in artifact_paths
+    assert "metadata.json" in artifact_paths

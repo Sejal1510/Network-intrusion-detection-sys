@@ -1,12 +1,17 @@
 """MLflow experiment tracking for a completed run.
 
 This is a thin adapter, not a second source of truth: everything logged
-here is derived from the same artifacts `nids.training.artifacts` already
-wrote to disk -- for a single split (`log_run`/`RunArtifacts`) or for
-cross-validation (`log_cv_run`/`CVRunArtifacts`). Both log the same shape
-of thing (flattened config as params, scalar metrics, the whole run
-directory as artifacts, identifying tags) so runs of either type are
-comparable side by side in the MLflow UI, not just a number or two.
+here is derived from artifacts `nids.training.artifacts` already wrote to
+disk -- for a single split (`log_run`/`RunArtifacts`), cross-validation
+(`log_cv_run`/`CVRunArtifacts`), or hyperparameter search
+(`log_tuning_run`/`TuningRunArtifacts`). All three log the same shape of
+thing (flattened config as params, scalar metrics, the whole run directory
+as artifacts, identifying tags) so runs of any type are comparable side by
+side in the MLflow UI, not just a number or two.
+
+This module is deliberately the only place that imports `mlflow` --
+nids.training.run/validation/tuning never touch it directly, so there is
+exactly one place tracking behavior can drift.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from typing import Any
 
 import mlflow
 
-from nids.training.artifacts import CVRunArtifacts, RunArtifacts
+from nids.training.artifacts import CVRunArtifacts, RunArtifacts, TuningRunArtifacts
 from nids.training.evaluate import scalar_metrics
 
 
@@ -59,7 +64,11 @@ def log_run(run_artifacts: RunArtifacts, tracking_uri: str | None = None) -> str
         return run.info.run_id
 
 
-def log_cv_run(cv_run_artifacts: CVRunArtifacts, tracking_uri: str | None = None) -> str:
+def log_cv_run(
+    cv_run_artifacts: CVRunArtifacts,
+    tracking_uri: str | None = None,
+    nested: bool = False,
+) -> str:
     """Log a completed cross-validation run to MLflow. Returns the MLflow
     run ID.
 
@@ -69,12 +78,20 @@ def log_cv_run(cv_run_artifacts: CVRunArtifacts, tracking_uri: str | None = None
     then just comparing two rows of the same table. `_std`/`_min`/`_max`
     are logged alongside for spread; the full per-fold breakdown lives in
     the logged `metrics.json` artifact, not squeezed into MLflow metrics.
+
+    `nested=True` logs this as a child run of whatever MLflow run is
+    currently active (used by `log_tuning_run` to group every trial under
+    its parent search); the caller is responsible for having an active run
+    and a tracking URI already set in that case.
     """
     config = cv_run_artifacts.config
-    mlflow.set_tracking_uri(tracking_uri if tracking_uri is not None else config.tracking_uri)
-    mlflow.set_experiment(config.experiment_name)
+    if not nested:
+        mlflow.set_tracking_uri(tracking_uri if tracking_uri is not None else config.tracking_uri)
+        mlflow.set_experiment(config.experiment_name)
 
-    with mlflow.start_run(run_name=config.run_name or cv_run_artifacts.metadata["run_id"]) as run:
+    with mlflow.start_run(
+        run_name=config.run_name or cv_run_artifacts.metadata["run_id"], nested=nested
+    ) as run:
         mlflow.log_params(_flatten(config.to_dict()))
 
         cv_metrics: dict[str, float] = {}
@@ -94,4 +111,48 @@ def log_cv_run(cv_run_artifacts: CVRunArtifacts, tracking_uri: str | None = None
                 "git_commit": cv_run_artifacts.metadata.get("git_commit") or "unknown",
             }
         )
+        return run.info.run_id
+
+
+def log_tuning_run(
+    tuning_run_artifacts: TuningRunArtifacts,
+    trial_cv_run_artifacts: list[CVRunArtifacts],
+    tracking_uri: str | None = None,
+) -> str:
+    """Log a completed hyperparameter search to MLflow: one parent run for
+    the study (best score/params, the search space, the base config) plus
+    one nested child run per trial (via `log_cv_run(..., nested=True)`,
+    reusing that function rather than re-implementing per-trial logging).
+
+    Returns the parent run's MLflow run ID.
+    """
+    config = tuning_run_artifacts.base_config
+    mlflow.set_tracking_uri(tracking_uri if tracking_uri is not None else config.tracking_uri)
+    mlflow.set_experiment(config.experiment_name)
+
+    metadata = tuning_run_artifacts.metadata
+    with mlflow.start_run(run_name=config.run_name or metadata["run_id"]) as run:
+        mlflow.log_params(_flatten(config.to_dict()))
+        mlflow.log_params(
+            {
+                "strategy_name": metadata["strategy_name"],
+                "metric": metadata["metric"],
+                "maximize": metadata["maximize"],
+                "n_trials": metadata["n_trials"],
+            }
+        )
+        mlflow.log_metrics({"best_score": metadata["best_score"]})
+        mlflow.log_artifacts(str(tuning_run_artifacts.run_dir))
+        mlflow.set_tags(
+            {
+                "model_name": config.model_name,
+                "run_type": "hyperparameter_search",
+                "best_trial_run_id": metadata["best_trial_run_id"],
+                "git_commit": metadata.get("git_commit") or "unknown",
+            }
+        )
+
+        for trial_cv_artifacts in trial_cv_run_artifacts:
+            log_cv_run(trial_cv_artifacts, nested=True)
+
         return run.info.run_id
