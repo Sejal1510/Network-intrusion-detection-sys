@@ -7,12 +7,14 @@ from mlflow.tracking import MlflowClient
 from nids.data import loader
 from nids.features import FeatureEngineer
 from nids.models.registry import build_model
-from nids.training.artifacts import save_run
+from nids.training.artifacts import save_cv_run, save_run
 from nids.training.config import TrainingConfig
 from nids.training.evaluate import evaluate_classifier
-from nids.training.tracking import log_run
+from nids.training.tracking import log_cv_run, log_run
+from nids.training.validation import run_cross_validation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd.txt"
+CV_FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd_cv.txt"
 
 
 @pytest.fixture(autouse=True)
@@ -64,6 +66,7 @@ def test_log_run_records_params_metrics_tags_and_artifacts(run_artifacts, tmp_pa
     assert "confusion_matrix" not in run.data.metrics  # nested structures aren't metrics
 
     assert run.data.tags["model_name"] == "random_forest"
+    assert run.data.tags["run_type"] == "single_split"
     assert run.data.tags["feature_schema_version"] == str(
         run_artifacts.metadata["feature_schema_version"]
     )
@@ -97,3 +100,55 @@ def test_log_run_explicit_tracking_uri_overrides_config(run_artifacts, tmp_path)
     client = MlflowClient(tracking_uri=override_uri)
     run = client.get_run(run_id)  # does not raise: run truly lives at override_uri
     assert run.data.params["model_name"] == "random_forest"
+
+
+@pytest.fixture
+def cv_run_artifacts(tmp_path):
+    df = loader._read_nsl_kdd_file(CV_FIXTURE)
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        cv_folds=3,
+        experiment_name="nids-test-experiment",
+        tracking_uri=_sqlite_uri(tmp_path),
+    )
+    cv_result = run_cross_validation(config, df=df)
+    return save_cv_run(tmp_path / "cv-run-tracking", cv_result)
+
+
+def test_log_cv_run_records_aggregated_metrics_tags_and_artifacts(cv_run_artifacts):
+    run_id = log_cv_run(cv_run_artifacts)
+
+    client = MlflowClient(tracking_uri=cv_run_artifacts.config.tracking_uri)
+    run = client.get_run(run_id)
+
+    accuracy_stats = cv_run_artifacts.aggregated_metrics["accuracy"]
+    assert run.data.metrics["accuracy"] == pytest.approx(accuracy_stats["mean"])
+    assert run.data.metrics["accuracy_std"] == pytest.approx(accuracy_stats["std"])
+    assert run.data.metrics["accuracy_min"] == pytest.approx(accuracy_stats["min"])
+    assert run.data.metrics["accuracy_max"] == pytest.approx(accuracy_stats["max"])
+
+    assert run.data.tags["model_name"] == "random_forest"
+    assert run.data.tags["run_type"] == "cross_validation"
+    assert run.data.tags["cv_folds"] == "3"
+
+    artifact_paths = {f.path for f in client.list_artifacts(run_id)}
+    assert "config.json" in artifact_paths
+    assert "metrics.json" in artifact_paths
+    assert "metadata.json" in artifact_paths
+    assert "model.joblib" not in artifact_paths  # no single model for a CV run
+
+
+def test_log_cv_run_metric_names_match_log_run_for_comparability(cv_run_artifacts, run_artifacts):
+    """A CV run's 'accuracy' and a single-split run's 'accuracy' must be the
+    same metric name, so the two show up comparably in the same MLflow
+    table column -- that's the whole point of sharing this metric shape."""
+    cv_run_id = log_cv_run(cv_run_artifacts)
+    single_run_id = log_run(run_artifacts, tracking_uri=cv_run_artifacts.config.tracking_uri)
+
+    client = MlflowClient(tracking_uri=cv_run_artifacts.config.tracking_uri)
+    cv_run = client.get_run(cv_run_id)
+    single_run = client.get_run(single_run_id)
+
+    assert "accuracy" in cv_run.data.metrics
+    assert "accuracy" in single_run.data.metrics

@@ -12,13 +12,18 @@ from nids.training.artifacts import (
     METADATA_FILENAME,
     METRICS_FILENAME,
     MODEL_FILENAME,
+    default_run_id,
+    load_cv_run,
     load_run,
+    save_cv_run,
     save_run,
 )
 from nids.training.config import TrainingConfig
 from nids.training.evaluate import evaluate_classifier
+from nids.training.validation import run_cross_validation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd.txt"
+CV_FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd_cv.txt"
 
 
 @pytest.fixture
@@ -82,9 +87,62 @@ def test_metadata_contains_expected_keys(trained_run, tmp_path):
     saved = save_run(tmp_path / "run-004", model, fe, config, metrics)
 
     metadata = saved.metadata
+    assert metadata["run_type"] == "single_split"
     assert metadata["model_name"] == "random_forest"
     assert metadata["feature_schema_version"] == fe.fit_metadata["schema_version"]
     assert metadata["n_features"] == len(fe.feature_names_out)
     assert "python_version" in metadata
     assert "sklearn_version" in metadata
     assert "git_commit" in metadata  # value may be None outside a git repo
+
+
+def test_default_run_id_distinguishes_run_types():
+    single_id = default_run_id("catboost")
+    cv_id = default_run_id("catboost", suffix="cv")
+
+    assert single_id.startswith("catboost_")
+    assert "cv" not in single_id.split("_")
+    assert cv_id.startswith("catboost_cv_")
+
+
+@pytest.fixture
+def cv_result():
+    df = loader._read_nsl_kdd_file(CV_FIXTURE)
+    config = TrainingConfig(model_name="random_forest", model_params={"n_estimators": 5}, cv_folds=3)
+    return run_cross_validation(config, df=df)
+
+
+def test_save_cv_run_writes_expected_files_and_no_model(cv_result, tmp_path):
+    run_dir = tmp_path / "cv-run-001"
+
+    save_cv_run(run_dir, cv_result)
+
+    assert (run_dir / CONFIG_FILENAME).exists()
+    assert (run_dir / METRICS_FILENAME).exists()
+    assert (run_dir / METADATA_FILENAME).exists()
+    # cross-validation fits a fresh model per fold; none of them is "the"
+    # deployable model, so neither is persisted at the CV-run level.
+    assert not (run_dir / MODEL_FILENAME).exists()
+    assert not (run_dir / FEATURE_PIPELINE_FILENAME).exists()
+
+
+def test_cv_run_metadata_identifies_run_type_and_fold_count(cv_result, tmp_path):
+    saved = save_cv_run(tmp_path / "cv-run-002", cv_result)
+
+    assert saved.metadata["run_type"] == "cross_validation"
+    assert saved.metadata["n_folds"] == 3
+    assert saved.metadata["model_name"] == "random_forest"
+    assert "git_commit" in saved.metadata
+
+
+def test_load_cv_run_reproduces_config_and_metrics(cv_result, tmp_path):
+    run_dir = tmp_path / "cv-run-003"
+    saved = save_cv_run(run_dir, cv_result)
+
+    loaded = load_cv_run(run_dir)
+
+    assert loaded.config == cv_result.config
+    assert loaded.n_folds == cv_result.n_folds
+    assert loaded.fold_metrics == cv_result.fold_metrics
+    assert loaded.aggregated_metrics == cv_result.aggregated_metrics
+    assert loaded.metadata == saved.metadata

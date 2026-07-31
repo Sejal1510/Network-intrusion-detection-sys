@@ -2,11 +2,17 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from mlflow.tracking import MlflowClient
 
 from nids.data import loader
 from nids.training import validation as validation_module
 from nids.training.config import TrainingConfig
-from nids.training.validation import CVResult, _aggregate_fold_metrics, run_cross_validation
+from nids.training.validation import (
+    CVResult,
+    _aggregate_fold_metrics,
+    run_cross_validation,
+    run_cv_training,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd_cv.txt"
 
@@ -143,3 +149,76 @@ def test_aggregate_fold_metrics_handles_metric_missing_from_some_folds():
     assert aggregated["accuracy"]["n_folds"] == 2
     assert aggregated["roc_auc"]["n_folds"] == 1
     assert aggregated["roc_auc"]["mean"] == pytest.approx(0.9)
+
+
+def test_run_cv_training_end_to_end_with_injected_data(cv_df, tmp_path):
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        cv_folds=3,
+        artifact_root=tmp_path / "runs",
+    )
+
+    cv_artifacts = run_cv_training(config, df=cv_df, log_to_mlflow=False)
+
+    assert cv_artifacts.run_dir.exists()
+    assert (cv_artifacts.run_dir / "config.json").exists()
+    assert (cv_artifacts.run_dir / "metrics.json").exists()
+    assert (cv_artifacts.run_dir / "metadata.json").exists()
+    assert not (cv_artifacts.run_dir / "model.joblib").exists()
+    assert cv_artifacts.n_folds == 3
+    assert cv_artifacts.metadata["run_id"] == cv_artifacts.run_dir.name
+
+
+def test_run_cv_training_default_run_id_is_distinguishable_from_single_split(cv_df, tmp_path):
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        cv_folds=3,
+        artifact_root=tmp_path / "runs",
+    )
+
+    cv_artifacts = run_cv_training(config, df=cv_df, log_to_mlflow=False)
+
+    assert "_cv_" in cv_artifacts.run_dir.name
+    assert cv_artifacts.run_dir.name.startswith("random_forest_cv_")
+
+
+def test_run_cv_training_respects_explicit_run_name(cv_df, tmp_path):
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        cv_folds=3,
+        artifact_root=tmp_path / "runs",
+        run_name="my-fixed-cv-run",
+    )
+
+    cv_artifacts = run_cv_training(config, df=cv_df, log_to_mlflow=False)
+
+    assert cv_artifacts.run_dir.name == "my-fixed-cv-run"
+
+
+def test_run_cv_training_logs_to_mlflow_when_enabled(cv_df, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    tracking_uri = f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}"
+
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        cv_folds=3,
+        artifact_root=tmp_path / "runs",
+        experiment_name="nids-cv-run-test",
+        tracking_uri=tracking_uri,
+    )
+
+    cv_artifacts = run_cv_training(config, df=cv_df)
+
+    client = MlflowClient(tracking_uri=tracking_uri)
+    experiment = client.get_experiment_by_name("nids-cv-run-test")
+    assert experiment is not None
+    runs = client.search_runs([experiment.experiment_id])
+    assert len(runs) == 1
+    assert runs[0].data.tags["run_type"] == "cross_validation"
+    assert runs[0].data.metrics["accuracy"] == pytest.approx(
+        cv_artifacts.aggregated_metrics["accuracy"]["mean"]
+    )

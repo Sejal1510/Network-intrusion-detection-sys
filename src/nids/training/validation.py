@@ -20,9 +20,11 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 
 from nids.data import load_train
+from nids.training.artifacts import CVRunArtifacts, default_run_id, save_cv_run
 from nids.training.config import TrainingConfig
 from nids.training.core import fit_and_evaluate
 from nids.training.evaluate import scalar_metrics
+from nids.training.tracking import log_cv_run
 
 
 @dataclass(frozen=True)
@@ -110,3 +112,27 @@ def run_cross_validation(
         fold_metrics=fold_metrics,
         aggregated_metrics=_aggregate_fold_metrics(fold_metrics),
     )
+
+
+def run_cv_training(
+    config: TrainingConfig,
+    df: pd.DataFrame | None = None,
+    log_to_mlflow: bool = True,
+) -> CVRunArtifacts:
+    """Run cross-validation and persist + track it exactly like
+    `nids.training.run.run_training` persists + tracks a single split --
+    same config-driven data loading, same artifact-directory conventions
+    (see nids.training.artifacts), same MLflow logging shape (see
+    nids.training.tracking). This is the "front door" for cross-validation,
+    the way `run_training` is for a single split; `run_cross_validation`
+    above is the pure computation it wraps.
+    """
+    cv_result = run_cross_validation(config, df=df)
+
+    run_id = config.run_name or default_run_id(config.model_name, suffix="cv")
+    cv_run_artifacts = save_cv_run(config.artifact_root / run_id, cv_result)
+
+    if log_to_mlflow:
+        log_cv_run(cv_run_artifacts)
+
+    return cv_run_artifacts

@@ -11,6 +11,7 @@ import argparse
 
 from nids.training.config import TrainingConfig
 from nids.training.run import run_training
+from nids.training.validation import run_cv_training
 
 
 def main() -> int:
@@ -26,6 +27,12 @@ def main() -> int:
         "--label-column", default="is_attack", choices=["is_attack", "attack_category"]
     )
     parser.add_argument("--no-mlflow", action="store_true", help="skip MLflow logging")
+    parser.add_argument(
+        "--cv",
+        action="store_true",
+        help="run stratified k-fold cross-validation instead of a single train/test split",
+    )
+    parser.add_argument("--cv-folds", type=int, default=5, help="number of folds when --cv is set")
     args = parser.parse_args()
 
     config = TrainingConfig(
@@ -33,7 +40,19 @@ def main() -> int:
         random_seed=args.seed,
         train_full=not args.quick,
         label_column=args.label_column,
+        cv_folds=args.cv_folds,
     )
+
+    if args.cv:
+        cv_artifacts = run_cv_training(config, log_to_mlflow=not args.no_mlflow)
+        print(f"run_id: {cv_artifacts.metadata['run_id']}")
+        print(f"saved to: {cv_artifacts.run_dir}")
+        print(f"aggregated metrics over {cv_artifacts.n_folds} folds:")
+        for key in ("accuracy", "precision_binary", "recall_binary", "f1_binary", "roc_auc"):
+            if key in cv_artifacts.aggregated_metrics:
+                stats = cv_artifacts.aggregated_metrics[key]
+                print(f"  {key}: {stats['mean']:.4f} +/- {stats['std']:.4f}")
+        return 0
 
     run_artifacts = run_training(config, log_to_mlflow=not args.no_mlflow)
 

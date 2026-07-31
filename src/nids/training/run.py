@@ -12,20 +12,13 @@ core rather than duplicating it.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pandas as pd
 
 from nids.data import load_test, load_train
-from nids.training.artifacts import RunArtifacts, save_run
+from nids.training.artifacts import RunArtifacts, default_run_id, save_run
 from nids.training.config import TrainingConfig
 from nids.training.core import fit_and_evaluate
 from nids.training.tracking import log_run
-
-
-def _default_run_id(config: TrainingConfig) -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{config.model_name}_{timestamp}"
 
 
 def run_training(
@@ -48,7 +41,7 @@ def run_training(
 
     result = fit_and_evaluate(train_df, test_df, config)
 
-    run_id = config.run_name or _default_run_id(config)
+    run_id = config.run_name or default_run_id(config.model_name)
     run_artifacts = save_run(
         config.artifact_root / run_id,
         result.model,
