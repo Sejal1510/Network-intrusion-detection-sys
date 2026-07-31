@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Testing / tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ML experiment tracking (local runs, not source)
+mlruns/
+mlartifacts/
+
+# Dataset (fetched via `python -m nids.data.download`, see docs/DATASET.md)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Stray artifacts
+package-lock.json
