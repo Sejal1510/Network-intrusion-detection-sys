@@ -30,6 +30,7 @@ mlflow.db-*
 
 # Trained run artifacts (see nids.training.artifacts)
 models/runs/
+catboost_info/
 
 # Dataset (fetched via `python -m nids.data.download`, see docs/DATASET.md)
 data/raw/*

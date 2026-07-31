@@ -31,7 +31,12 @@ ModelFactory = Callable[..., Classifier]
 
 
 def _build_catboost(random_state: int, **hyperparams: Any) -> CatBoostClassifier:
-    params = {"verbose": False, "random_seed": random_state, **hyperparams}
+    params = {
+        "verbose": False,
+        "random_seed": random_state,
+        "allow_writing_files": False,  # skip CatBoost's own ./catboost_info/ logging dir
+        **hyperparams,
+    }
     return CatBoostClassifier(**params)
 
 
