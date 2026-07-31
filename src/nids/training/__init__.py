@@ -15,15 +15,22 @@ from nids.training.config import TrainingConfig
 from nids.training.core import FitEvalResult, fit_and_evaluate
 from nids.training.evaluate import evaluate_classifier
 from nids.training.run import run_training
+from nids.training.search import GridSearch, RandomSearch, SearchStrategy
 from nids.training.tracking import log_cv_run, log_run
+from nids.training.tuning import TuningResult, TuningTrial, search_hyperparameters
 from nids.training.validation import CVResult, run_cross_validation, run_cv_training
 
 __all__ = [
     "CVResult",
     "CVRunArtifacts",
     "FitEvalResult",
+    "GridSearch",
+    "RandomSearch",
     "RunArtifacts",
+    "SearchStrategy",
     "TrainingConfig",
+    "TuningResult",
+    "TuningTrial",
     "default_run_id",
     "evaluate_classifier",
     "fit_and_evaluate",
@@ -36,4 +43,5 @@ __all__ = [
     "run_training",
     "save_cv_run",
     "save_run",
+    "search_hyperparameters",
 ]
