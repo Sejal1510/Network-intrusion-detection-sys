@@ -13,6 +13,7 @@ def test_defaults():
     assert config.random_seed == 42
     assert config.label_column == "is_attack"
     assert config.artifact_root == Path("models/runs")
+    assert config.cv_folds == 5
 
 
 def test_is_frozen():
@@ -31,6 +32,11 @@ def test_model_params_default_is_not_shared_between_instances():
 def test_rejects_unknown_label_column():
     with pytest.raises(ValueError, match="label_column"):
         TrainingConfig(label_column="not_a_real_column")
+
+
+def test_rejects_cv_folds_below_two():
+    with pytest.raises(ValueError, match="cv_folds"):
+        TrainingConfig(cv_folds=1)
 
 
 def test_to_dict_is_json_serializable():

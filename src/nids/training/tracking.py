@@ -10,12 +10,12 @@ number or two.
 
 from __future__ import annotations
 
-from numbers import Real
 from typing import Any
 
 import mlflow
 
 from nids.training.artifacts import RunArtifacts
+from nids.training.evaluate import scalar_metrics
 
 
 def _flatten(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
@@ -27,17 +27,6 @@ def _flatten(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
         else:
             flat[full_key] = value
     return flat
-
-
-def _scalar_metrics(metrics: dict[str, Any]) -> dict[str, float]:
-    """MLflow metrics must be plain numbers; metrics.json also holds nested
-    structures (confusion_matrix, classification_report, labels) that go to
-    MLflow as a logged artifact instead, not as metrics."""
-    return {
-        key: float(value)
-        for key, value in metrics.items()
-        if isinstance(value, Real) and not isinstance(value, bool)
-    }
 
 
 def log_run(run_artifacts: RunArtifacts, tracking_uri: str | None = None) -> str:
@@ -55,7 +44,7 @@ def log_run(run_artifacts: RunArtifacts, tracking_uri: str | None = None) -> str
 
     with mlflow.start_run(run_name=config.run_name or run_artifacts.metadata["run_id"]) as run:
         mlflow.log_params(_flatten(config.to_dict()))
-        mlflow.log_metrics(_scalar_metrics(run_artifacts.metrics))
+        mlflow.log_metrics(scalar_metrics(run_artifacts.metrics))
         mlflow.log_artifacts(str(run_artifacts.run_dir))
         mlflow.set_tags(
             {

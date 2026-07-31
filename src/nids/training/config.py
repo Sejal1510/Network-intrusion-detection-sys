@@ -23,6 +23,9 @@ class TrainingConfig:
     test_exclude_difficulty_21: bool = False
     label_column: str = "is_attack"
 
+    # Cross-validation (see nids.training.validation)
+    cv_folds: int = 5
+
     # Experiment tracking / artifact naming (see nids.training.artifacts,
     # nids.training.tracking)
     experiment_name: str = "nids-baseline"
@@ -36,6 +39,8 @@ class TrainingConfig:
                 f"label_column must be one of {sorted(VALID_LABEL_COLUMNS)}, "
                 f"got {self.label_column!r}."
             )
+        if self.cv_folds < 2:
+            raise ValueError(f"cv_folds must be >= 2, got {self.cv_folds}.")
 
     def to_dict(self) -> dict[str, Any]:
         """A JSON-serializable representation, for persisting alongside a

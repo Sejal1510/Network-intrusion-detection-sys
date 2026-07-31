@@ -10,6 +10,7 @@ the registry produces and for both the binary (`is_attack`) and multiclass
 from __future__ import annotations
 
 import warnings
+from numbers import Real
 from typing import Any
 
 import numpy as np
@@ -37,6 +38,21 @@ def _to_builtin(obj: Any) -> Any:
     if isinstance(obj, np.generic):
         return obj.item()
     return obj
+
+
+def scalar_metrics(metrics: dict[str, Any]) -> dict[str, float]:
+    """The plain-number subset of a metrics dict -- excludes nested
+    structures like `confusion_matrix`/`classification_report`/`labels`.
+
+    Shared by anything that can only consume flat numeric metrics: MLflow's
+    `log_metrics` (see nids.training.tracking) and cross-fold aggregation
+    (see nids.training.validation).
+    """
+    return {
+        key: float(value)
+        for key, value in metrics.items()
+        if isinstance(value, Real) and not isinstance(value, bool)
+    }
 
 
 def evaluate_classifier(

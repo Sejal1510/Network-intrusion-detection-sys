@@ -8,8 +8,10 @@ from nids.training.core import FitEvalResult, fit_and_evaluate
 from nids.training.evaluate import evaluate_classifier
 from nids.training.run import run_training
 from nids.training.tracking import log_run
+from nids.training.validation import CVResult, run_cross_validation
 
 __all__ = [
+    "CVResult",
     "FitEvalResult",
     "RunArtifacts",
     "TrainingConfig",
@@ -17,6 +19,7 @@ __all__ = [
     "fit_and_evaluate",
     "load_run",
     "log_run",
+    "run_cross_validation",
     "run_training",
     "save_run",
 ]

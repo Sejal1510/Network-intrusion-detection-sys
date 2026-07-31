@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from nids.training.evaluate import evaluate_classifier
+from nids.training.evaluate import evaluate_classifier, scalar_metrics
 
 
 def test_binary_perfect_predictions():
@@ -79,3 +79,15 @@ def test_output_is_json_serializable():
     serialized = json.dumps(metrics)  # must not raise
     reloaded = json.loads(serialized)
     assert reloaded["n_samples"] == 6
+
+
+def test_scalar_metrics_excludes_nested_structures():
+    metrics = evaluate_classifier([0, 1, 0, 1], [0, 1, 1, 1], y_proba=[0.1, 0.9, 0.6, 0.8])
+
+    scalars = scalar_metrics(metrics)
+
+    assert scalars["accuracy"] == metrics["accuracy"]
+    assert all(isinstance(v, float) for v in scalars.values())
+    assert "confusion_matrix" not in scalars
+    assert "classification_report" not in scalars
+    assert "labels" not in scalars
