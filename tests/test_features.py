@@ -68,6 +68,17 @@ def test_transform_before_fit_raises(batch_df):
         fe.transform(batch_df)
 
 
+def test_fit_metadata_is_accessible_and_copied(batch_df):
+    fe = FeatureEngineer().fit(batch_df)
+
+    metadata = fe.fit_metadata
+    assert metadata["schema_version"] == FEATURE_SCHEMA_VERSION
+    assert metadata["n_samples_fit"] == len(batch_df)
+
+    metadata["schema_version"] = "tampered"
+    assert fe.fit_metadata["schema_version"] == FEATURE_SCHEMA_VERSION  # unaffected by mutation
+
+
 def test_save_load_roundtrip_reproduces_identical_output(batch_df, tmp_path):
     fe = FeatureEngineer().fit(batch_df)
     original = fe.transform(batch_df)

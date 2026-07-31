@@ -94,6 +94,13 @@ class FeatureEngineer:
             raise RuntimeError("FeatureEngineer is not fitted yet.")
         return list(self._column_transformer.get_feature_names_out())
 
+    @property
+    def fit_metadata(self) -> dict[str, Any]:
+        """Schema version, library version, fit timestamp, etc. recorded at
+        fit time -- for callers (e.g. artifact persistence) that need it
+        without reaching into a private attribute."""
+        return dict(self._fit_metadata)
+
     def fit(self, df: pd.DataFrame) -> FeatureEngineer:
         validate_raw_records(df)
 
