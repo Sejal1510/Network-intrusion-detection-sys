@@ -32,6 +32,18 @@ def main() -> int:
     )
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--database-url",
+        default=None,
+        help="optional SQLAlchemy URL (e.g. sqlite:///history.db) to persist every "
+        "prediction/alert to; omitted means no persistence (see docs/DATABASE.md)",
+    )
+    parser.add_argument(
+        "--alert-threshold",
+        type=float,
+        default=70.0,
+        help="minimum risk score (0-100) that raises an alert",
+    )
     args = parser.parse_args()
 
     config = ServingConfig(
@@ -40,6 +52,8 @@ def main() -> int:
         artifact_root=Path(args.artifact_root),
         host=args.host,
         port=args.port,
+        database_url=args.database_url,
+        alert_threshold=args.alert_threshold,
     )
     app = create_app(config)
 

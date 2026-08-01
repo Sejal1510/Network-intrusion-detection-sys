@@ -88,3 +88,41 @@ def test_cli_main_loads_optional_anomaly_run_id(fixture_df, trained_run_dir, mon
     ensemble = calls["app"].state.served_ensemble
     assert ensemble.anomaly_detector is not None
     assert ensemble.anomaly_detector.run_id == "cli-anomaly-run"
+
+
+def test_cli_main_wires_database_url_and_alert_threshold(trained_run_dir, tmp_path, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--database-url",
+            f"sqlite:///{tmp_path / 'history.db'}",
+            "--alert-threshold",
+            "50",
+        ],
+    )
+
+    exit_code = cli_module.main()
+
+    assert exit_code == 0
+    assert calls["app"].state.db_engine is not None
+    assert calls["app"].state.serving_config.alert_threshold == 50.0
+
+
+def test_cli_main_defaults_to_no_database(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["nids-api", "--run-id", "cli-fixture-run", "--artifact-root", str(trained_run_dir)],
+    )
+
+    cli_module.main()
+
+    assert calls["app"].state.db_engine is None

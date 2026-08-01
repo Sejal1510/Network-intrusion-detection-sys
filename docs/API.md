@@ -1,11 +1,13 @@
 # Inference API
 
-**Status:** Milestone 4 — explainable hybrid detection. The API serves a
-required supervised classifier and an optional unsupervised anomaly
-detector (Isolation Forest) together, and can explain any prediction's
-classifier verdict with SHAP on request. Live packet capture, alerts, and
-history are future milestones — see [Future endpoints](#future-endpoints)
-for how they plug into this architecture without restructuring it.
+**Status:** Milestone 5 — Security Intelligence layer. Every prediction
+is now classified, scored for anomaly, explained on request, given a
+numeric risk score, mapped to MITRE ATT&CK (where possible), and
+threshold-gated into an alert — and, when a database is configured, all
+of it is persisted and queryable via the History API. Live packet
+capture, notification integrations, and threat intel feeds are future
+milestones — see [Future endpoints](#future-endpoints) for how they plug
+into this architecture without restructuring it.
 
 ## Architecture
 
@@ -35,17 +37,31 @@ Client (JSON / CSV upload)
              -> classifier.feature_engineer.transform()   never inside inference.py
              -> shap.TreeExplainer(classifier.model)        cached per served model
              -> Explanation(base_value, top_features, summary)
-   -> response schema -> JSON
+   -> nids.api.risk.compute_risk_score(PredictionResult)          ALWAYS runs, pure
+   -> nids.api.mitre.map_to_mitre(PredictionResult.attack_category) ALWAYS runs, pure
+        (both consume only PredictionResult fields -- independent of each
+         other and of whether ?explain=true was used)
+   -> nids.api.alerts.generate_alert(...)     threshold-gated (alert_threshold, default 70) --
+                                               None below threshold, the common case
+   -> if database_url configured:
+        nids.api.store.save_prediction/save_alert    OPT-IN, off by default
+   -> response schema -> JSON  (risk_score/mitre/alert_id always present; alert_id
+                                 reflects whether an alert was RAISED, independent
+                                 of whether persistence is even on)
 ```
 
 If no anomaly detector is pinned, `anomaly_score`/`is_anomaly` are `null`
 and `severity` is computed from classifier confidence alone — `/predict`
 reproduces Milestone 2's behavior exactly. If `explain` is omitted or
 `false` (the default), `explanation` is `null` and zero SHAP code runs —
-`/predict` reproduces Milestone 3's behavior exactly.
-`nids.api.inference` has never imported `shap` and still doesn't;
-`nids.api.explain` is a second delegate the route calls *alongside* it,
-not a change inside it.
+`/predict` reproduces Milestone 3's behavior exactly. If `database_url`
+is unset (the default), zero DB writes happen and every other field is
+unaffected — `/predict` reproduces Milestone 4's behavior exactly, plus
+the new always-on `risk_score`/`mitre`/`alert_id` fields.
+`nids.api.inference` has never imported `shap` (or `sqlalchemy`) and
+still doesn't; `explain.py`/`risk.py`/`mitre.py`/`alerts.py`/`store.py`
+are independent delegates the route calls *alongside* it, never changes
+inside it.
 
 Both runs are loaded **once, at process startup**, via
 `nids.training.artifacts.load_run` — the exact `(model, FeatureEngineer,
@@ -61,9 +77,14 @@ model to serve is an explicit, reviewable config change.
 | `nids/api/inference.py` | Pure `predict_one`/`predict_batch` — no HTTP awareness |
 | `nids/api/severity.py` | Pure `compute_severity` rule table |
 | `nids/api/explain.py` | Pure `explain_one`/`explain_batch` — SHAP, no HTTP awareness |
+| `nids/api/risk.py` | Pure `compute_risk_score` — numeric 0-100 synthesis |
+| `nids/api/mitre.py` | Pure `map_to_mitre` — data-driven ATT&CK lookup |
+| `nids/api/alerts.py` | Pure `generate_alert` — threshold-gated |
+| `nids/api/store.py` | SQLAlchemy persistence (opt-in) — see `docs/DATABASE.md` |
+| `nids/api/history.py` | `/history/*` `APIRouter` — read access + alert acknowledgement |
 | `nids/api/schemas.py` | Pydantic request/response contracts |
 | `nids/api/app.py` | FastAPI routes — HTTP boundary only |
-| `nids/api/cli.py` | `python -m nids.api --run-id ... [--anomaly-run-id ...]` entrypoint |
+| `nids/api/cli.py` | `python -m nids.api --run-id ... [--anomaly-run-id ...] [--database-url ...] [--alert-threshold ...]` entrypoint |
 | `nids/models/anomaly.py` | `IsolationForestClassifier` — Isolation Forest adapted to the `Classifier` protocol, plus `explainable_model` for SHAP |
 
 ## Endpoints
@@ -120,13 +141,14 @@ missing fields are rejected — both by Pydantic before any ML code runs.
 }
 ```
 
-**Response** (`PredictResponse`), `POST /predict?explain=true`:
+**Response** (`PredictResponse`), `POST /predict?explain=true` against an
+`attack_category`-trained, hybrid-served run:
 ```json
 {
-  "prediction": 1,
-  "probabilities": { "0": 0.06, "1": 0.94 },
-  "confidence": 0.94,
-  "attack_category": null,
+  "prediction": "dos",
+  "probabilities": { "normal": 0.02, "dos": 0.85, "probe": 0.05, "r2l": 0.05, "u2r": 0.03 },
+  "confidence": 0.85,
+  "attack_category": "dos",
   "anomaly_score": 0.57,
   "is_anomaly": true,
   "severity": "critical",
@@ -137,8 +159,20 @@ missing fields are rejected — both by Pydantic before any ML code runs.
       { "feature": "src_bytes", "value": 99999, "contribution": 0.31, "direction": "positive" },
       { "feature": "logged_in", "value": 0, "contribution": -0.05, "direction": "negative" }
     ],
-    "summary": "Predicted 1 primarily due to: service='http' (+0.42), src_bytes=99999 (+0.31), logged_in=0 (-0.05)."
-  }
+    "summary": "Predicted 'dos' primarily due to: service='http' (+0.42), src_bytes=99999 (+0.31), logged_in=0 (-0.05)."
+  },
+  "risk_score": {
+    "score": 87.3,
+    "severity": "critical",
+    "factors": { "attack_confidence": 0.425, "anomaly": 0.171, "severity_band": 0.2 }
+  },
+  "mitre": {
+    "tactic": "Impact",
+    "techniques": [
+      { "id": "T1498", "name": "Network Denial of Service", "url": "https://attack.mitre.org/techniques/T1498/" }
+    ]
+  },
+  "alert_id": "3fa1c2e0-...-9b7d"
 }
 ```
 
@@ -152,6 +186,33 @@ missing fields are rejected — both by Pydantic before any ML code runs.
 | `is_anomaly` | Whether the anomaly detector flagged this record. `null` unless `--anomaly-run-id` is served |
 | `severity` | One of `"critical"`/`"high"`/`"medium"`/`"low"` — see [`nids/api/severity.py`](../src/nids/api/severity.py) for the rule table |
 | `explanation` | `null` unless `?explain=true`. Explains the **predicted class** (`prediction` above) — see below |
+| `risk_score` | Always present — see [Risk scoring](#risk-scoring) below |
+| `mitre` | `null` for `"normal"` predictions, for `is_attack`-only deployments, or for a category absent from the mapping table — see [MITRE ATT&CK mapping](#mitre-attck-mapping) |
+| `alert_id` | `null` unless `risk_score.score >= alert_threshold` (default `70`) — populated whether or not a database is configured; only *retrievable later* if one is |
+
+#### Risk scoring
+
+`risk_score.score` (0-100) synthesizes three weighted, `[0,1]`-normalized
+components (see [`nids/api/risk.py`](../src/nids/api/risk.py)):
+`attack_confidence` (0.5 — the classifier's confidence when it predicted
+an attack, `0` for a normal verdict), `anomaly` (0.3 — the anomaly
+detector's score, when one is served; its weight is redistributed
+proportionally across the other two when it isn't, so a classifier-only
+deployment's ceiling is still `100`), and `severity_band` (0.2 — the
+existing `severity` folded back in as a coarse anchor). `factors` reports
+each component's already-weighted contribution, so
+`sum(factors.values()) == score / 100`. `risk_score.severity` is
+literally `PredictResponse.severity` — one taxonomy, not two.
+
+#### MITRE ATT&CK mapping
+
+A static, data-driven lookup
+([`nids/api/mitre_attack_mapping.json`](../src/nids/api/mitre_attack_mapping.json))
+from `attack_category` to a MITRE tactic + techniques. Mapping precision
+is capped at category granularity (`dos`/`probe`/`r2l`/`u2r`) — NSL-KDD's
+finer per-attack-type label isn't exposed past training. Extending the
+mapping (more techniques, a different taxonomy for a different dataset)
+is a JSON edit, never a code change.
 
 **`explanation` fields:**
 
@@ -186,19 +247,24 @@ columns are ignored. `?explain=true` explains every row.
     {
       "prediction": 0, "probabilities": { "0": 0.94, "1": 0.06 }, "confidence": 0.94,
       "attack_category": null, "anomaly_score": 0.12, "is_anomaly": false, "severity": "low",
-      "explanation": null
+      "explanation": null,
+      "risk_score": { "score": 3.6, "severity": "low", "factors": { "attack_confidence": 0.0, "anomaly": 0.036, "severity_band": 0.02 } },
+      "mitre": null, "alert_id": null
     },
     "..."
   ]
 }
 ```
 
-**Batch explanation cost caveat:** unlike prediction, which is cheap per
-row, `?explain=true` on `/predict/batch` runs SHAP over the whole uploaded
+**Batch cost caveats:** `?explain=true` runs SHAP over the whole uploaded
 file (vectorized — one `shap_values` call for the batch, not once per
-row, but the cost still scales with batch size and tree complexity).
-Recommended for investigative or moderate-sized batches, not
-high-throughput bulk scoring.
+row, but cost still scales with batch size and tree complexity). Risk
+scoring and MITRE mapping are cheap pure functions and add negligible
+cost regardless of batch size. When `database_url` is configured,
+persistence writes one row per prediction (and per raised alert) via
+individual synchronous inserts — fine for investigative or moderate
+batches; see [`docs/DATABASE.md`](DATABASE.md) for when that stops being
+true and what to reach for instead.
 
 ## Status codes
 
@@ -206,8 +272,9 @@ high-throughput bulk scoring.
 |---|---|
 | `200` | Successful request |
 | `400` | `/predict/batch`: not a `.csv` file, unparseable CSV, or missing required columns. `ValueError` from feature validation maps here. |
-| `422` | `/predict`: request body fails Pydantic validation (missing/extra/wrong-type field) — FastAPI's standard validation error shape |
-| `503` | No model is loaded (should only occur if startup loading failed) |
+| `404` | `/history/*`: no prediction/alert with the given id |
+| `422` | `/predict`: request body fails Pydantic validation (missing/extra/wrong-type field) — FastAPI's standard validation error shape. `/history/*`: an out-of-range `limit`/`offset` |
+| `503` | No model is loaded (should only occur if startup loading failed). `/history/*`: no `database_url` configured for this deployment |
 
 ## Example requests
 
@@ -229,6 +296,10 @@ curl -X POST http://localhost:8000/predict/batch \
 
 curl -X POST 'http://localhost:8000/predict/batch?explain=true' \
   -F "file=@connections.csv"
+
+curl 'http://localhost:8000/history/predictions?severity=critical&limit=10'
+curl 'http://localhost:8000/history/alerts?acknowledged=false'
+curl -X POST http://localhost:8000/history/alerts/<alert_id>/acknowledge
 ```
 
 Run the server:
@@ -240,6 +311,10 @@ python -m nids.api --run-id <run_id> --artifact-root models/runs --port 8000
 # hybrid: classifier + anomaly detector
 python -m nids.api --run-id <run_id> --anomaly-run-id <isolation_forest_run_id> \
   --artifact-root models/runs --port 8000
+
+# with persistence + a custom alert threshold
+python -m nids.api --run-id <run_id> --database-url sqlite:///history.db \
+  --alert-threshold 60 --artifact-root models/runs --port 8000
 ```
 
 Training the anomaly detector uses the same training CLI as any other
@@ -249,6 +324,37 @@ model, just with `--model isolation_forest` and `--label-column is_attack`
 ```bash
 python -m nids.training --model isolation_forest --label-column is_attack
 ```
+
+## History API
+
+Read access to persisted predictions/alerts (see
+[`docs/DATABASE.md`](DATABASE.md)), plus the one write action a SOC
+workflow needs. Every route below `503`s unless `--database-url` was
+passed at startup.
+
+| Route | Purpose |
+|---|---|
+| `GET /history/predictions` | List, filtered by `severity`, `attack_category`, `min_risk_score`, `start_date`/`end_date`; paginated by `limit` (default `20`, max `100`) / `offset` |
+| `GET /history/predictions/{id}` | Full detail, including `explanation`/`mitre` when present. `404` if unknown |
+| `GET /history/alerts` | List, filtered by `level`, `acknowledged`, `start_date`/`end_date`; same pagination shape |
+| `GET /history/alerts/{id}` | Full detail. `404` if unknown |
+| `POST /history/alerts/{id}/acknowledge` | Flips `acknowledged` to `true`. Idempotent; `404` if unknown |
+
+List responses share one shape: `{ "items": [...], "total": <int>,
+"limit": <int>, "offset": <int> }`. **Pagination** is offset/limit —
+simple and sufficient at this scale; cursor-based pagination is the named
+upgrade if result sets grow large enough for offset scans to matter.
+**Searching** is structured field filters only, not free-text — see
+[`docs/DATABASE.md`](DATABASE.md) for why (Elasticsearch is the named
+upgrade for that requirement, not adopted now).
+
+## Persistence
+
+Entirely opt-in: unset `database_url` (the default) means zero DB writes
+and zero behavior change other than `risk_score`/`mitre`/`alert_id` still
+being computed and returned (they always run; only the *write* is
+opt-in). Full schema, engine choice, and justification in
+[`docs/DATABASE.md`](DATABASE.md).
 
 ## Future endpoints
 
@@ -290,25 +396,45 @@ or route, not a restructure of `nids/api`:
   `nids.features.contracts`'s adapter pattern, a capture agent is just
   another producer of a DataFrame satisfying `FEATURE_COLUMNS` — it calls
   the same `inference.predict_one`, either in-process as a new module or
-  out-of-process by POSTing to `/predict`.
+  out-of-process by POSTing to `/predict`. The `source` field already on
+  every persisted prediction/alert (`"api"` today) is exactly where such
+  a caller would identify itself — no schema change needed.
 - **WebSockets / streaming.** FastAPI serves WebSocket routes from the same
   app alongside REST routes; a streaming route calls `inference.predict_one`
-  per message. No change to `inference.py` or existing routes.
-- **Prediction history.** A future `nids/api/store.py` persists
-  `PredictResponse` — including `explanation` when `?explain=true` was
-  used — as-is; it's already a structured, serializable shape, no schema
-  redesign needed.
-- **MITRE ATT&CK mapping.** A future enrichment keyed off
-  `attack_category` (already a response field) is an additive lookup
-  table, unrelated to `explain.py`.
-- **Alert engine.** Consumes `severity` (Milestone 3) and
-  `explanation.summary`/`top_features` (Milestone 4) as alert message
-  content — a new consumer, not a backend change.
-- **Route growth.** `app.py` builds its routes on a `fastapi.APIRouter`
-  from the start. Future endpoint groups (`/capture`, `/history`,
-  `/alerts`) become their own router modules, included via
-  `app.include_router(...)` in `create_app`, rather than edits to the
-  existing routes.
+  per message, or pushes newly-`save_alert`'d `Alert`s to subscribers —
+  `store.py`'s repository functions are already the single write path a
+  streaming layer would hook.
+- **Prediction history / MITRE ATT&CK mapping / Alert engine — done
+  (Milestone 5).** `nids/api/store.py` + `history.py`,
+  `nids/api/mitre.py`, and `nids/api/alerts.py` respectively. Kept as
+  worked examples of the pattern the remaining items below follow.
+- **Notification integrations (email/Slack/Teams/...).** `nids.api.alerts.
+  NotificationChannel` is a documented, unimplemented `Protocol`
+  (`send(alert: Alert) -> None`) — a future `nids/api/notifications/
+  {email,slack,teams}.py` each implement it, and a future dispatcher calls
+  every configured channel whenever `generate_alert` returns non-`None`.
+  `Alert` is already a plain, serializable dataclass any channel can
+  format; nothing in `alerts.py` changes to add one.
+- **Threat intelligence feeds.** A future enrichment stage between MITRE
+  mapping and alerting (e.g. IP reputation) is another pure function
+  consuming `PredictionResult`/the raw record, composed the same way
+  `risk.py`/`mitre.py` are today.
+- **Rule-based detections.** A future `nids/api/rules.py` producing its
+  own `Alert`s (same dataclass, `source="rule"`) alongside the ML-driven
+  path — `Alert`'s shape doesn't assume ML provenance.
+- **Explaining the anomaly detector / non-tree explainer strategies.**
+  Unchanged from Milestone 4 — see `nids/api/explain.py`'s module
+  docstring.
+- **Multi-user deployments / cloud deployment.** The `DATABASE_URL`
+  abstraction (`docs/DATABASE.md`) is exactly this seam — swap SQLite for
+  a shared Postgres instance, no application code change. Per-user
+  auth/RBAC is a genuinely new concern, not addressed by anything built
+  so far, but doesn't conflict with it either.
+- **Route growth.** `app.py` and `history.py` each build their routes on
+  their own `fastapi.APIRouter`, included in `create_app` — `history.py`
+  is itself the first real exercise of this pattern (previously only
+  documented). Future endpoint groups (`/capture`, `/rules`) follow the
+  same shape.
 
 ## Tests
 
@@ -318,9 +444,17 @@ prediction, classifier-only and hybrid), `test_api_severity.py`
 (table-driven rule tests), `test_api_explain.py` (SHAP shape
 normalization, raw-feature aggregation, an additive-consistency check
 against each registered model's own output, and end-to-end
-`explain_one`/`explain_batch`), `test_api_schemas.py` (request/response
-contracts), `test_api_app.py` (routes, via `fastapi.testclient.TestClient`,
-classifier-only, hybrid, and `?explain=true`), `test_api_cli.py` (argument
+`explain_one`/`explain_batch`), `test_api_risk.py` (weighted-component
+table tests, weight-renormalization when no anomaly detector is served,
+the `sum(factors) == score/100` invariant), `test_api_mitre.py` (every
+`ATTACK_CATEGORY` value maps or correctly doesn't), `test_api_alerts.py`
+(threshold gating, message composition), `test_api_store.py` (CRUD
+round-trips, filters, pagination against a temp SQLite file),
+`test_api_history.py` (routes end-to-end, including `503` with no
+database and `404` on unknown ids), `test_api_schemas.py`
+(request/response contracts), `test_api_app.py` (routes, via
+`fastapi.testclient.TestClient`, classifier-only, hybrid, `?explain=true`,
+and with/without persistence configured), `test_api_cli.py` (argument
 parsing and server wiring, with `uvicorn.run` mocked out).
 `tests/test_models_anomaly.py` and
 `tests/test_isolation_forest_pipeline_reuse.py` cover the model layer and
