@@ -22,6 +22,11 @@ DEFAULT_ARTIFACT_ROOT: Path = TrainingConfig().artifact_root
 @dataclasses.dataclass(frozen=True)
 class ServingConfig:
     run_id: str
+    # Optional second run: an anomaly detector (e.g. isolation_forest)
+    # served alongside the classifier for hybrid detection (see
+    # nids.api.model_loader.ServedEnsemble). Unset means classifier-only
+    # serving, identical to Milestone 2's behavior.
+    anomaly_run_id: str | None = None
     artifact_root: Path = DEFAULT_ARTIFACT_ROOT
     host: str = "0.0.0.0"
     port: int = 8000

@@ -1,4 +1,4 @@
-"""Load the trained model this API process serves, once, at startup.
+"""Load the trained model(s) this API process serves, once, at startup.
 
 Thin wrapper around nids.training.artifacts.load_run -- serving reuses the
 exact persisted (model, FeatureEngineer, metrics, metadata) a training run
@@ -7,6 +7,7 @@ already produced; there is no separate "export for serving" step or format.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +27,7 @@ class ServedModel:
 
 
 def load_served_model(config: ServingConfig) -> ServedModel:
-    """Load the run pinned by `config` into memory for serving.
+    """Load the run pinned by `config.run_id` into memory for serving.
 
     Raises FileNotFoundError (via load_run) if `config.run_dir` doesn't
     exist -- callers (e.g. app startup) should let that fail loudly rather
@@ -40,3 +41,33 @@ def load_served_model(config: ServingConfig) -> ServedModel:
         metrics=run_artifacts.metrics,
         metadata=run_artifacts.metadata,
     )
+
+
+@dataclass(frozen=True)
+class ServedEnsemble:
+    """Everything a request needs to produce a hybrid prediction: a
+    required classifier and an optional anomaly detector, each its own
+    independently trained run (own model, own fitted FeatureEngineer)."""
+
+    classifier: ServedModel
+    anomaly_detector: ServedModel | None
+
+
+def load_served_ensemble(config: ServingConfig) -> ServedEnsemble:
+    """Load the classifier run pinned by `config.run_id`, plus the
+    optional anomaly-detector run pinned by `config.anomaly_run_id` (both
+    under `config.artifact_root`), for hybrid serving.
+
+    The anomaly detector is loaded via the same `load_served_model` path
+    as the classifier -- it is just another run, not a different kind of
+    artifact. `anomaly_run_id=None` (Milestone 2's default) loads a
+    classifier-only ensemble.
+    """
+    classifier = load_served_model(config)
+
+    anomaly_detector: ServedModel | None = None
+    if config.anomaly_run_id is not None:
+        anomaly_config = dataclasses.replace(config, run_id=config.anomaly_run_id)
+        anomaly_detector = load_served_model(anomaly_config)
+
+    return ServedEnsemble(classifier=classifier, anomaly_detector=anomaly_detector)
