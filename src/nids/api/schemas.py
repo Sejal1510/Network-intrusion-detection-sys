@@ -39,6 +39,23 @@ class ExplanationResponse(BaseModel):
     summary: str
 
 
+class MitreTechniqueResponse(BaseModel):
+    id: str
+    name: str
+    url: str
+
+
+class MitreMappingResponse(BaseModel):
+    tactic: str
+    techniques: list[MitreTechniqueResponse]
+
+
+class RiskScoreResponse(BaseModel):
+    score: float
+    severity: str
+    factors: dict[str, float]
+
+
 class PredictResponse(BaseModel):
     prediction: Any
     probabilities: dict[str, float] | None = None
@@ -48,6 +65,9 @@ class PredictResponse(BaseModel):
     is_anomaly: bool | None = None
     severity: str
     explanation: ExplanationResponse | None = None
+    risk_score: RiskScoreResponse
+    mitre: MitreMappingResponse | None = None
+    alert_id: str | None = None
 
 
 class BatchPredictSummary(BaseModel):

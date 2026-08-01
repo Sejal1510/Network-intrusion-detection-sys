@@ -61,6 +61,27 @@ def hybrid_client(fixture_df, tmp_path):
 
 
 @pytest.fixture
+def persisted_client(fixture_df, tmp_path):
+    """A client with database_url configured -- exercises the opt-in
+    persistence path end-to-end."""
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        artifact_root=tmp_path / "runs",
+        run_name="app-fixture-run",
+    )
+    run_training(config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+
+    serving_config = ServingConfig(
+        run_id="app-fixture-run",
+        artifact_root=tmp_path / "runs",
+        database_url=f"sqlite:///{tmp_path / 'history.db'}",
+    )
+    app = create_app(serving_config)
+    return TestClient(app), app
+
+
+@pytest.fixture
 def valid_record(fixture_df) -> dict:
     record = fixture_df.iloc[0].to_dict()
     return {k: record[k] for k in FEATURE_COLUMNS}
@@ -244,3 +265,113 @@ def test_predict_batch_with_explain_true_populates_every_result(client, fixture_
     assert len(results) == len(fixture_df)
     assert all(r["explanation"] is not None for r in results)
     assert all(len(r["explanation"]["top_features"]) > 0 for r in results)
+
+
+def test_predict_always_includes_risk_score_even_without_database(client, valid_record):
+    """risk scoring/MITRE mapping/alerting always run -- only the DB
+    write is opt-in (see database_url on ServingConfig)."""
+    response = client.post("/predict", json=valid_record)
+
+    body = response.json()
+    assert body["risk_score"]["score"] >= 0.0
+    assert body["risk_score"]["severity"] == body["severity"]
+    assert sum(body["risk_score"]["factors"].values()) == pytest.approx(body["risk_score"]["score"] / 100)
+
+
+def test_predict_without_database_configured_writes_nothing(client, valid_record, tmp_path):
+    """No database_url -> zero DB writes -- proves persistence is truly
+    opt-in, matching every prior milestone's default-off pattern."""
+    before = set(tmp_path.rglob("*.db"))
+
+    client.post("/predict", json=valid_record)
+
+    after = set(tmp_path.rglob("*.db"))
+    assert before == after
+
+
+def test_predict_mitre_is_populated_for_attack_category_models(fixture_df, tmp_path):
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        artifact_root=tmp_path / "runs",
+        run_name="category-run",
+        label_column="attack_category",
+    )
+    run_training(config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+    app = create_app(ServingConfig(run_id="category-run", artifact_root=tmp_path / "runs"))
+    client = TestClient(app)
+    record = {k: fixture_df.iloc[0].to_dict()[k] for k in FEATURE_COLUMNS}
+
+    body = client.post("/predict", json=record).json()
+
+    if body["attack_category"] not in (None, "normal"):
+        assert body["mitre"] is not None
+        assert body["mitre"]["tactic"]
+    else:
+        assert body["mitre"] is None
+
+
+def test_predict_mitre_is_null_for_is_attack_only_models(client, valid_record):
+    body = client.post("/predict", json=valid_record).json()
+    assert body["mitre"] is None
+
+
+def test_predict_persists_prediction_when_database_configured(persisted_client, valid_record):
+    from nids.api import store
+
+    client, app = persisted_client
+    response = client.post("/predict", json=valid_record)
+    body = response.json()
+
+    page = store.list_predictions(app.state.db_engine)
+    assert page.total == 1
+    assert page.items[0].severity == body["severity"]
+    assert page.items[0].risk_score == pytest.approx(body["risk_score"]["score"])
+
+
+def test_predict_alert_id_is_none_below_threshold(persisted_client, valid_record):
+    from nids.api import store
+
+    client, app = persisted_client
+    # threshold defaults to 70; force it high so nothing crosses it
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        alert_threshold=1000.0,
+    )
+
+    body = client.post("/predict", json=valid_record).json()
+
+    assert body["alert_id"] is None
+    assert store.list_alerts(app.state.db_engine).total == 0
+
+
+def test_predict_raises_and_persists_alert_when_threshold_is_low(persisted_client, valid_record):
+    from nids.api import store
+
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        alert_threshold=0.0,
+    )
+
+    body = client.post("/predict", json=valid_record).json()
+
+    assert body["alert_id"] is not None
+    alerts = store.list_alerts(app.state.db_engine)
+    assert alerts.total == 1
+    assert alerts.items[0].id == body["alert_id"]
+
+
+def test_predict_batch_persists_every_row_when_database_configured(persisted_client, fixture_df):
+    from nids.api import store
+
+    client, app = persisted_client
+    csv_bytes = fixture_df.to_csv(index=False).encode("utf-8")
+
+    client.post("/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")})
+
+    assert store.list_predictions(app.state.db_engine).total == len(fixture_df)

@@ -7,9 +7,12 @@ from nids.api.schemas import (
     ExplanationResponse,
     FeatureContributionResponse,
     HealthResponse,
+    MitreMappingResponse,
+    MitreTechniqueResponse,
     ModelInfoResponse,
     PredictRequest,
     PredictResponse,
+    RiskScoreResponse,
     ServedRunInfo,
 )
 from nids.data.schema import CATEGORICAL_COLUMNS, FEATURE_COLUMNS
@@ -21,6 +24,10 @@ def _valid_record() -> dict:
     record["service"] = "http"
     record["flag"] = "SF"
     return record
+
+
+def _risk_score(score: float = 10.0, severity: str = "low") -> RiskScoreResponse:
+    return RiskScoreResponse(score=score, severity=severity, factors={"attack_confidence": 0.0})
 
 
 def test_predict_request_fields_match_feature_columns_exactly():
@@ -52,7 +59,7 @@ def test_predict_request_rejects_unknown_extra_field():
 
 
 def test_predict_response_hybrid_fields_default_to_none():
-    response = PredictResponse(prediction=1, severity="low")
+    response = PredictResponse(prediction=1, severity="low", risk_score=_risk_score())
 
     assert response.probabilities is None
     assert response.confidence is None
@@ -60,6 +67,8 @@ def test_predict_response_hybrid_fields_default_to_none():
     assert response.anomaly_score is None
     assert response.is_anomaly is None
     assert response.explanation is None
+    assert response.mitre is None
+    assert response.alert_id is None
 
 
 def test_explanation_response_round_trips():
@@ -72,7 +81,9 @@ def test_explanation_response_round_trips():
         ],
         summary="Predicted 1 primarily due to: service='http' (+0.42).",
     )
-    response = PredictResponse(prediction=1, severity="high", explanation=explanation)
+    response = PredictResponse(
+        prediction=1, severity="high", risk_score=_risk_score(), explanation=explanation
+    )
 
     assert response.explanation.top_features[0].feature == "service"
     assert response.explanation.base_value == 0.1
@@ -80,15 +91,40 @@ def test_explanation_response_round_trips():
 
 def test_predict_response_requires_severity():
     with pytest.raises(ValidationError):
-        PredictResponse(prediction=1)
+        PredictResponse(prediction=1, risk_score=_risk_score())
+
+
+def test_predict_response_requires_risk_score():
+    with pytest.raises(ValidationError):
+        PredictResponse(prediction=1, severity="low")
+
+
+def test_predict_response_carries_mitre_mapping():
+    mapping = MitreMappingResponse(
+        tactic="Impact",
+        techniques=[MitreTechniqueResponse(id="T1498", name="Network DoS", url="https://example.com")],
+    )
+    response = PredictResponse(
+        prediction="dos", severity="high", risk_score=_risk_score(80.0, "high"), mitre=mapping
+    )
+
+    assert response.mitre.tactic == "Impact"
+    assert response.mitre.techniques[0].id == "T1498"
+
+
+def test_predict_response_carries_alert_id():
+    response = PredictResponse(
+        prediction=1, severity="critical", risk_score=_risk_score(95.0, "critical"), alert_id="alert-1"
+    )
+    assert response.alert_id == "alert-1"
 
 
 def test_batch_predict_response_round_trips():
     batch = BatchPredictResponse(
         summary=BatchPredictSummary(total_records=2, prediction_counts={"0": 1, "1": 1}),
         results=[
-            PredictResponse(prediction=0, severity="low"),
-            PredictResponse(prediction=1, severity="high"),
+            PredictResponse(prediction=0, severity="low", risk_score=_risk_score()),
+            PredictResponse(prediction=1, severity="high", risk_score=_risk_score(75.0, "high")),
         ],
     )
     assert len(batch.results) == 2
