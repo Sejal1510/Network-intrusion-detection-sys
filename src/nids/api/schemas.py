@@ -149,3 +149,18 @@ class AlertHistoryResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class PairingTokenResponse(BaseModel):
+    pairing_token: str
+    expires_in_seconds: int
+
+
+class PairingExchangeRequest(BaseModel):
+    pairing_token: str
+    device_name: str
+
+
+class DeviceCredentialResponse(BaseModel):
+    device_id: str
+    token: str

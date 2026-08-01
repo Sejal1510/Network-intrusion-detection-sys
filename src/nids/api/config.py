@@ -37,6 +37,19 @@ class ServingConfig:
     # Minimum RiskScore.score (0-100) that generates an Alert (see
     # nids.api.alerts). Most predictions should not become alerts.
     alert_threshold: float = 70.0
+    # MessageBus backend for live monitoring (nids.api.bus): unset means
+    # InMemoryBus (default, zero new infrastructure -- one process, no
+    # Redis). Set to e.g. "redis://localhost:6379" for RedisBus, the
+    # opt-in scaling tier (see docs/LIVE_MONITORING.md).
+    redis_url: str | None = None
+    # Signs agent pairing tokens (nids.api.agent_auth). Unset means a
+    # random key is generated once at startup -- fine since pairing
+    # tokens are short-lived and meant to be redeemed within minutes of
+    # issuing; already-*paired* devices are unaffected by a restart
+    # (their credential is verified by a stored hash, not this key). Set
+    # explicitly for a deployment where issued-but-unredeemed pairing
+    # tokens must survive a restart.
+    secret_key: str | None = None
 
     @property
     def run_dir(self) -> Path:

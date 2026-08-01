@@ -15,16 +15,19 @@ modules and included alongside this one without touching it.
 from __future__ import annotations
 
 import io
+import secrets
 from typing import Annotated
 
 import pandas as pd
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pandas.errors import EmptyDataError, ParserError
 
+from nids.api.bus import create_bus
 from nids.api.config import ServingConfig
 from nids.api.explain import Explanation, explain_batch
 from nids.api.history import router as history_router
 from nids.api.inference import predict_batch
+from nids.api.ingest import router as ingest_router
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.pipeline import finish_record, process_record, row_to_json_safe_dict
 from nids.api.schemas import (
@@ -168,12 +171,19 @@ def create_app(config: ServingConfig) -> FastAPI:
     Loading happens here rather than lazily on first request, so a bad
     run_id or corrupt run directory fails at startup. `db_engine` is
     `None` unless `config.database_url` is set -- persistence is entirely
-    opt-in (see `nids.api.store`).
+    opt-in (see `nids.api.store`). `bus` is an `InMemoryBus` unless
+    `config.redis_url` is set (see `nids.api.bus`) -- live monitoring
+    works out of the box with zero new infrastructure either way.
+    `secret_key` (for agent pairing tokens, see `nids.api.agent_auth`) is
+    generated once at startup if not set explicitly.
     """
     app = FastAPI(title="NIDS Inference API")
     app.state.served_ensemble = load_served_ensemble(config)
     app.state.serving_config = config
     app.state.db_engine = create_db_engine(config.database_url) if config.database_url else None
+    app.state.bus = create_bus(config.redis_url)
+    app.state.secret_key = config.secret_key or secrets.token_urlsafe(32)
     app.include_router(router)
     app.include_router(history_router)
+    app.include_router(ingest_router)
     return app
