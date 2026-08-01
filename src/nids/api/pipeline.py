@@ -132,6 +132,7 @@ def persist_if_configured(
     anomaly_run_id: str | None,
     explanation: Explanation | None,
     alert: Alert | None,
+    source: str = "api",
     device_id: str | None = None,
 ) -> None:
     """Writes are entirely opt-in (`db_engine is None` when no
@@ -151,6 +152,7 @@ def persist_if_configured(
         label_column,
         anomaly_run_id=anomaly_run_id,
         explanation=explanation,
+        source=source,
         device_id=device_id,
     )
     if alert is not None:
@@ -190,6 +192,7 @@ def finish_record(
             anomaly_run_id,
             explanation,
             alert,
+            source=source,
             device_id=device_id,
         )
 

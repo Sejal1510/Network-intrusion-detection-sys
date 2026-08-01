@@ -25,6 +25,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pandas.errors import EmptyDataError, ParserError
 
+from nids.api.broadcast import router as broadcast_router
 from nids.api.bus import InMemoryBus, create_bus
 from nids.api.config import ServingConfig
 from nids.api.explain import Explanation, explain_batch
@@ -216,4 +217,5 @@ def create_app(config: ServingConfig) -> FastAPI:
     app.include_router(router)
     app.include_router(history_router)
     app.include_router(ingest_router)
+    app.include_router(broadcast_router)
     return app
