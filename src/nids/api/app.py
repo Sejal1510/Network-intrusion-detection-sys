@@ -24,6 +24,7 @@ from sqlalchemy.engine import Engine
 from nids.api.alerts import Alert, generate_alert
 from nids.api.config import ServingConfig
 from nids.api.explain import Explanation, explain_batch, explain_one
+from nids.api.history import router as history_router
 from nids.api.inference import PredictionResult, predict_batch, predict_one
 from nids.api.mitre import MitreMapping, map_to_mitre
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
@@ -305,4 +306,5 @@ def create_app(config: ServingConfig) -> FastAPI:
     app.state.serving_config = config
     app.state.db_engine = create_db_engine(config.database_url) if config.database_url else None
     app.include_router(router)
+    app.include_router(history_router)
     return app

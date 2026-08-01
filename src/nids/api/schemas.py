@@ -9,6 +9,7 @@ list here that can silently drift out of sync.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, create_model
@@ -99,3 +100,52 @@ class ModelInfoResponse(BaseModel):
     metrics: dict[str, Any]
     metadata: dict[str, Any]
     anomaly_detector: ServedRunInfo | None = None
+
+
+class PredictionHistoryItem(BaseModel):
+    id: str
+    created_at: datetime
+    run_id: str
+    anomaly_run_id: str | None
+    label_column: str
+    prediction: str
+    probabilities: dict[str, float] | None
+    confidence: float | None
+    attack_category: str | None
+    anomaly_score: float | None
+    is_anomaly: bool | None
+    severity: str
+    risk_score: float
+    risk_factors: dict[str, float]
+    mitre: dict[str, Any] | None
+    raw_record: dict[str, Any]
+    source: str
+    explanation: dict[str, Any] | None
+
+
+class PredictionHistoryResponse(BaseModel):
+    items: list[PredictionHistoryItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class AlertHistoryItem(BaseModel):
+    id: str
+    prediction_id: str
+    created_at: datetime
+    level: str
+    title: str
+    message: str
+    risk_score: float
+    attack_category: str | None
+    mitre: dict[str, Any] | None
+    acknowledged: bool
+    source: str
+
+
+class AlertHistoryResponse(BaseModel):
+    items: list[AlertHistoryItem]
+    total: int
+    limit: int
+    offset: int
