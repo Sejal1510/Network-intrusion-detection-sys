@@ -263,3 +263,51 @@ def test_list_alerts_filters_by_level(engine):
 
     assert page.total == 1
     assert page.items[0].id == "a2"
+
+
+# ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+
+
+def test_register_device_roundtrips(engine):
+    device = store.register_device(engine, name="ayush-laptop", credential_hash="hash1")
+
+    assert device.name == "ayush-laptop"
+    assert device.revoked is False
+    assert device.last_seen_at is None
+
+
+def test_get_device_by_credential_hash_finds_registered_device(engine):
+    registered = store.register_device(engine, name="ayush-laptop", credential_hash="hash1")
+
+    found = store.get_device_by_credential_hash(engine, "hash1")
+
+    assert found is not None
+    assert found.id == registered.id
+
+
+def test_get_device_by_credential_hash_returns_none_for_unknown_hash(engine):
+    assert store.get_device_by_credential_hash(engine, "not-a-real-hash") is None
+
+
+def test_touch_device_last_seen_sets_timestamp(engine):
+    device = store.register_device(engine, name="ayush-laptop", credential_hash="hash1")
+
+    store.touch_device_last_seen(engine, device.id)
+
+    refreshed = store.get_device_by_credential_hash(engine, "hash1")
+    assert refreshed.last_seen_at is not None
+
+
+def test_revoke_device_sets_revoked_flag(engine):
+    device = store.register_device(engine, name="ayush-laptop", credential_hash="hash1")
+
+    revoked = store.revoke_device(engine, device.id)
+
+    assert revoked.revoked is True
+    assert store.get_device_by_credential_hash(engine, "hash1").revoked is True
+
+
+def test_revoke_device_returns_none_for_unknown_id(engine):
+    assert store.revoke_device(engine, "does-not-exist") is None

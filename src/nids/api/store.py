@@ -104,6 +104,24 @@ class AlertRecord(Base):
     prediction: Mapped[PredictionRecord] = relationship(back_populates="alerts")
 
 
+class DeviceRecord(Base):
+    """A paired live-capture agent (see `nids.api.agent_auth`,
+    `nids.agent`). Only `credential_hash` is ever stored -- never the raw
+    bearer token a device presents on connect."""
+
+    __tablename__ = "devices"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    name: Mapped[str] = mapped_column(String)
+    credential_hash: Mapped[str] = mapped_column(String, unique=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    paired_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked: Mapped[bool] = mapped_column(default=False)
+
+
 # ---------------------------------------------------------------------------
 # Read models -- plain dataclasses, safe to use after the session that
 # produced them has closed.
@@ -152,6 +170,16 @@ class AlertRecordView:
     mitre: dict[str, Any] | None
     acknowledged: bool
     source: str
+
+
+@dataclass(frozen=True)
+class DeviceRecordView:
+    id: str
+    name: str
+    user_id: str | None
+    paired_at: datetime
+    last_seen_at: datetime | None
+    revoked: bool
 
 
 @dataclass(frozen=True)
@@ -207,6 +235,17 @@ def _alert_to_view(record: AlertRecord) -> AlertRecordView:
         mitre=record.mitre,
         acknowledged=record.acknowledged,
         source=record.source,
+    )
+
+
+def _device_to_view(record: DeviceRecord) -> DeviceRecordView:
+    return DeviceRecordView(
+        id=record.id,
+        name=record.name,
+        user_id=record.user_id,
+        paired_at=record.paired_at,
+        last_seen_at=record.last_seen_at,
+        revoked=record.revoked,
     )
 
 
@@ -394,3 +433,44 @@ def acknowledge_alert(engine: Engine, alert_id: str) -> AlertRecordView | None:
         record.acknowledged = True
         session.commit()
         return _alert_to_view(record)
+
+
+# ---------------------------------------------------------------------------
+# Devices (see nids.api.agent_auth)
+# ---------------------------------------------------------------------------
+
+
+def register_device(
+    engine: Engine, name: str, credential_hash: str, user_id: str | None = None
+) -> DeviceRecordView:
+    record = DeviceRecord(name=name, credential_hash=credential_hash, user_id=user_id)
+    with Session(engine) as session:
+        session.add(record)
+        session.commit()
+        return _device_to_view(record)
+
+
+def get_device_by_credential_hash(engine: Engine, credential_hash: str) -> DeviceRecordView | None:
+    with Session(engine) as session:
+        record = session.scalars(
+            select(DeviceRecord).where(DeviceRecord.credential_hash == credential_hash)
+        ).one_or_none()
+        return _device_to_view(record) if record is not None else None
+
+
+def touch_device_last_seen(engine: Engine, device_id: str) -> None:
+    with Session(engine) as session:
+        record = session.get(DeviceRecord, device_id)
+        if record is not None:
+            record.last_seen_at = datetime.now(timezone.utc)
+            session.commit()
+
+
+def revoke_device(engine: Engine, device_id: str) -> DeviceRecordView | None:
+    with Session(engine) as session:
+        record = session.get(DeviceRecord, device_id)
+        if record is None:
+            return None
+        record.revoked = True
+        session.commit()
+        return _device_to_view(record)
