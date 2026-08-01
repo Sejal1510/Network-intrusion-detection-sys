@@ -1,7 +1,7 @@
 """Load the trained model this API process serves, once, at startup.
 
 Thin wrapper around nids.training.artifacts.load_run -- serving reuses the
-exact persisted (model, FeatureEngineer, metadata) triple a training run
+exact persisted (model, FeatureEngineer, metrics, metadata) a training run
 already produced; there is no separate "export for serving" step or format.
 """
 
@@ -21,6 +21,7 @@ class ServedModel:
     run_id: str
     model: Classifier
     feature_engineer: FeatureEngineer
+    metrics: dict[str, Any]
     metadata: dict[str, Any]
 
 
@@ -36,5 +37,6 @@ def load_served_model(config: ServingConfig) -> ServedModel:
         run_id=config.run_id,
         model=run_artifacts.model,
         feature_engineer=run_artifacts.feature_engineer,
+        metrics=run_artifacts.metrics,
         metadata=run_artifacts.metadata,
     )

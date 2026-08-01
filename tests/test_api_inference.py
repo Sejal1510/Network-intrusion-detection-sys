@@ -24,6 +24,7 @@ def served_model(fixture_df):
         run_id="test-run",
         model=result.model,
         feature_engineer=result.feature_engineer,
+        metrics=result.metrics,
         metadata={"model_name": "random_forest"},
     )
 

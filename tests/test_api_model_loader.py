@@ -37,6 +37,7 @@ def test_load_served_model_loads_pinned_run(trained_run_dir):
     assert served.run_id == "serving-fixture-run"
     assert served.feature_engineer.is_fitted
     assert served.metadata["model_name"] == "random_forest"
+    assert "accuracy" in served.metrics
 
 
 def test_load_served_model_raises_for_unknown_run_id(trained_run_dir):
