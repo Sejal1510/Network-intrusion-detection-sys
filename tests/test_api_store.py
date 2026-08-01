@@ -311,3 +311,48 @@ def test_revoke_device_sets_revoked_flag(engine):
 
 def test_revoke_device_returns_none_for_unknown_id(engine):
     assert store.revoke_device(engine, "does-not-exist") is None
+
+
+# ---------------------------------------------------------------------------
+# device_id tagging on predictions/alerts (live capture agent flows)
+# ---------------------------------------------------------------------------
+
+
+def test_save_prediction_persists_device_id(engine):
+    prediction_id = store.save_prediction(
+        engine,
+        _result(),
+        _risk(),
+        mitre=None,
+        raw_record={},
+        run_id="run-1",
+        label_column="is_attack",
+        device_id="device-1",
+    )
+
+    assert store.get_prediction(engine, prediction_id).device_id == "device-1"
+
+
+def test_save_alert_persists_device_id(engine):
+    prediction_id = store.save_prediction(
+        engine, _result(), _risk(), mitre=None, raw_record={}, run_id="run-1", label_column="is_attack"
+    )
+    alert_id = store.save_alert(engine, prediction_id, _alert(), device_id="device-1")
+
+    assert store.get_alert(engine, alert_id).device_id == "device-1"
+
+
+def test_list_predictions_filters_by_device_id(engine):
+    store.save_prediction(
+        engine, _result(), _risk(), mitre=None, raw_record={}, run_id="run-1",
+        label_column="is_attack", device_id="device-1",
+    )
+    store.save_prediction(
+        engine, _result(), _risk(), mitre=None, raw_record={}, run_id="run-1",
+        label_column="is_attack", device_id="device-2",
+    )
+
+    page = store.list_predictions(engine, device_id="device-1")
+
+    assert page.total == 1
+    assert page.items[0].device_id == "device-1"

@@ -132,11 +132,13 @@ def persist_if_configured(
     anomaly_run_id: str | None,
     explanation: Explanation | None,
     alert: Alert | None,
+    device_id: str | None = None,
 ) -> None:
     """Writes are entirely opt-in (`db_engine is None` when no
     `database_url` was configured) -- alert *generation* already happened
     unconditionally by the time this is called; this only decides whether
-    to record it."""
+    to record it. `device_id` is `None` for HTTP-originated predictions
+    and set for live-agent-originated ones (see `nids.api.worker`)."""
     if db_engine is None:
         return
     prediction_id = save_prediction(
@@ -149,9 +151,10 @@ def persist_if_configured(
         label_column,
         anomaly_run_id=anomaly_run_id,
         explanation=explanation,
+        device_id=device_id,
     )
     if alert is not None:
-        save_alert(db_engine, prediction_id, alert)
+        save_alert(db_engine, prediction_id, alert, device_id=device_id)
 
 
 def finish_record(
@@ -164,6 +167,7 @@ def finish_record(
     db_engine: Engine | None,
     persist: bool = True,
     source: str = "api",
+    device_id: str | None = None,
 ) -> PredictResponse:
     """risk -> mitre -> alert -> optional persist -> response, given an
     already-computed prediction (and, optionally, explanation)."""
@@ -186,6 +190,7 @@ def finish_record(
             anomaly_run_id,
             explanation,
             alert,
+            device_id=device_id,
         )
 
     alert_id = alert.alert_id if alert is not None else None
@@ -201,6 +206,7 @@ def process_record(
     explain: ExplainPolicy = False,
     persist: bool = True,
     source: str = "api",
+    device_id: str | None = None,
 ) -> PredictResponse:
     """Run one raw record through the full pipeline: predict -> optional
     explain -> risk -> mitre -> alert -> optional persist -> response.
@@ -223,4 +229,5 @@ def process_record(
         db_engine=db_engine,
         persist=persist,
         source=source,
+        device_id=device_id,
     )

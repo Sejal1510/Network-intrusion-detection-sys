@@ -14,15 +14,18 @@ modules and included alongside this one without touching it.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import io
 import secrets
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 import pandas as pd
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pandas.errors import EmptyDataError, ParserError
 
-from nids.api.bus import create_bus
+from nids.api.bus import InMemoryBus, create_bus
 from nids.api.config import ServingConfig
 from nids.api.explain import Explanation, explain_batch
 from nids.api.history import router as history_router
@@ -40,6 +43,7 @@ from nids.api.schemas import (
     ServedRunInfo,
 )
 from nids.api.store import create_db_engine
+from nids.api.worker import run_worker
 
 router = APIRouter()
 
@@ -165,6 +169,32 @@ async def predict_batch_csv(
     )
 
 
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Starts the live worker (`nids.api.worker.run_worker`) as a
+    background task for the `InMemoryBus` tier only -- with `RedisBus`,
+    the worker is meant to run as its own process
+    (`python -m nids.api.worker`), scaling independently via Redis
+    Streams consumer groups; auto-starting a second in-process consumer
+    there would just be a redundant, harder-to-reason-about competing
+    consumer in the same group.
+    """
+    worker_task: asyncio.Task | None = None
+    if isinstance(app.state.bus, InMemoryBus):
+        worker_task = asyncio.create_task(
+            run_worker(
+                app.state.bus, app.state.served_ensemble, app.state.serving_config, app.state.db_engine
+            )
+        )
+    try:
+        yield
+    finally:
+        if worker_task is not None:
+            worker_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker_task
+
+
 def create_app(config: ServingConfig) -> FastAPI:
     """Build a fully wired app serving the run(s) pinned by `config`.
 
@@ -177,7 +207,7 @@ def create_app(config: ServingConfig) -> FastAPI:
     `secret_key` (for agent pairing tokens, see `nids.api.agent_auth`) is
     generated once at startup if not set explicitly.
     """
-    app = FastAPI(title="NIDS Inference API")
+    app = FastAPI(title="NIDS Inference API", lifespan=_lifespan)
     app.state.served_ensemble = load_served_ensemble(config)
     app.state.serving_config = config
     app.state.db_engine = create_db_engine(config.database_url) if config.database_url else None

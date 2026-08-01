@@ -65,6 +65,7 @@ class PredictionRecord(Base):
     mitre: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     raw_record: Mapped[dict[str, Any]] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String, default="api")
+    device_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     explanation: Mapped[ExplanationRecord | None] = relationship(
         back_populates="prediction", uselist=False, cascade="all, delete-orphan"
@@ -100,6 +101,7 @@ class AlertRecord(Base):
     mitre: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     acknowledged: Mapped[bool] = mapped_column(default=False)
     source: Mapped[str] = mapped_column(String)
+    device_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     prediction: Mapped[PredictionRecord] = relationship(back_populates="alerts")
 
@@ -154,6 +156,7 @@ class PredictionRecordView:
     mitre: dict[str, Any] | None
     raw_record: dict[str, Any]
     source: str
+    device_id: str | None
     explanation: ExplanationView | None
 
 
@@ -170,6 +173,7 @@ class AlertRecordView:
     mitre: dict[str, Any] | None
     acknowledged: bool
     source: str
+    device_id: str | None
 
 
 @dataclass(frozen=True)
@@ -218,6 +222,7 @@ def _prediction_to_view(record: PredictionRecord) -> PredictionRecordView:
         mitre=record.mitre,
         raw_record=record.raw_record,
         source=record.source,
+        device_id=record.device_id,
         explanation=explanation,
     )
 
@@ -233,6 +238,7 @@ def _alert_to_view(record: AlertRecord) -> AlertRecordView:
         risk_score=record.risk_score,
         attack_category=record.attack_category,
         mitre=record.mitre,
+        device_id=record.device_id,
         acknowledged=record.acknowledged,
         source=record.source,
     )
@@ -291,6 +297,7 @@ def save_prediction(
     anomaly_run_id: str | None = None,
     explanation: Explanation | None = None,
     source: str = "api",
+    device_id: str | None = None,
 ) -> str:
     """Persist one prediction (and its explanation, if given). Returns the
     new prediction's id."""
@@ -310,6 +317,7 @@ def save_prediction(
         mitre=_mitre_to_dict(mitre),
         raw_record=raw_record,
         source=source,
+        device_id=device_id,
     )
     if explanation is not None:
         record.explanation = ExplanationRecord(
@@ -324,7 +332,7 @@ def save_prediction(
         return record.id
 
 
-def save_alert(engine: Engine, prediction_id: str, alert: Alert) -> str:
+def save_alert(engine: Engine, prediction_id: str, alert: Alert, device_id: str | None = None) -> str:
     record = AlertRecord(
         id=alert.alert_id,
         prediction_id=prediction_id,
@@ -337,6 +345,7 @@ def save_alert(engine: Engine, prediction_id: str, alert: Alert) -> str:
         mitre=_mitre_to_dict(alert.mitre),
         acknowledged=False,
         source=alert.source,
+        device_id=device_id,
     )
     with Session(engine) as session:
         session.add(record)
@@ -373,6 +382,7 @@ def list_predictions(
     min_risk_score: float | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    device_id: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> Page:
@@ -388,6 +398,8 @@ def list_predictions(
             stmt = stmt.where(PredictionRecord.created_at >= start_date)
         if end_date is not None:
             stmt = stmt.where(PredictionRecord.created_at <= end_date)
+        if device_id is not None:
+            stmt = stmt.where(PredictionRecord.device_id == device_id)
 
         total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         rows = session.scalars(
@@ -402,6 +414,7 @@ def list_alerts(
     acknowledged: bool | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    device_id: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> Page:
@@ -415,6 +428,8 @@ def list_alerts(
             stmt = stmt.where(AlertRecord.created_at >= start_date)
         if end_date is not None:
             stmt = stmt.where(AlertRecord.created_at <= end_date)
+        if device_id is not None:
+            stmt = stmt.where(AlertRecord.device_id == device_id)
 
         total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         rows = session.scalars(
