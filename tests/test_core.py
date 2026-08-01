@@ -62,6 +62,25 @@ def test_fit_and_evaluate_supports_multiclass_label_column(fixture_df):
     assert "precision_binary" not in result.metrics
 
 
+def test_fit_and_evaluate_supports_catboost_multiclass(fixture_df):
+    """Regression test: CatBoost's multiclass predict() returns a 2D
+    (n_samples, 1) column vector rather than RandomForest's flat 1D array
+    -- evaluate_classifier must handle this shape difference
+    transparently (see nids.training.evaluate._flatten_predictions).
+    Previously crashed with `TypeError: unhashable type: 'list'`."""
+    config = TrainingConfig(
+        model_name="catboost",
+        model_params={"iterations": 5, "depth": 2},
+        label_column="attack_category",
+    )
+
+    result = fit_and_evaluate(fixture_df, fixture_df, config)
+
+    assert isinstance(result.model, CatBoostClassifier)
+    assert "precision_macro" in result.metrics
+    assert "precision_binary" not in result.metrics
+
+
 def test_fit_and_evaluate_is_deterministic_given_same_seed(fixture_df):
     config = TrainingConfig(model_name="random_forest", model_params={"n_estimators": 5})
 

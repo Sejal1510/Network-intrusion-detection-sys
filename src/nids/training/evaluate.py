@@ -26,6 +26,30 @@ from sklearn.metrics import (
 )
 
 
+def _flatten_predictions(y: np.ndarray) -> np.ndarray:
+    """Normalize a predicted/true-label array to 1D.
+
+    Most classifiers' `predict()` already returns a flat `(n_samples,)`
+    array (every model registered in `nids.models.registry` does, in
+    every case except one). CatBoost's multiclass `predict()` is the
+    exception: it returns a 2D column vector of shape `(n_samples, 1)`
+    (verified empirically -- CatBoost's own binary `predict()` and
+    scikit-learn's `RandomForestClassifier` for both binary and
+    multiclass all return flat 1D arrays already). `.tolist()` on that
+    shape produces a list of one-element lists, which blows up `set()`
+    with `TypeError: unhashable type: 'list'`.
+
+    Collapsing on *shape* (`(n, 1)` -> `(n,)`), not on model identity,
+    means this isn't a CatBoost-specific branch: it transparently
+    protects every current and future registered model against the same
+    class of surprise, and leaves any other shape untouched rather than
+    guessing what to do with it.
+    """
+    if y.ndim == 2 and y.shape[1] == 1:
+        return y.reshape(-1)
+    return y
+
+
 def _to_builtin(obj: Any) -> Any:
     """Recursively convert numpy scalars/arrays to native Python types so
     the result is always json.dumps-able."""
@@ -72,8 +96,8 @@ def evaluate_classifier(
     `y_true`; if only one does (e.g. a tiny or pathological sample), the
     corresponding key is simply omitted rather than raising.
     """
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
+    y_true = _flatten_predictions(np.asarray(y_true))
+    y_pred = _flatten_predictions(np.asarray(y_pred))
     labels = sorted(set(y_true.tolist()) | set(y_pred.tolist()))
 
     metrics: dict[str, Any] = {

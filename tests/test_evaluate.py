@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from nids.training.evaluate import evaluate_classifier, scalar_metrics
+from nids.training.evaluate import _flatten_predictions, evaluate_classifier, scalar_metrics
 
 
 def test_binary_perfect_predictions():
@@ -79,6 +79,50 @@ def test_output_is_json_serializable():
     serialized = json.dumps(metrics)  # must not raise
     reloaded = json.loads(serialized)
     assert reloaded["n_samples"] == 6
+
+
+def test_flatten_predictions_collapses_column_vector():
+    """CatBoost's multiclass predict() shape, reproduced directly."""
+    result = _flatten_predictions(np.array([[1], [2], [3]]))
+
+    assert result.shape == (3,)
+    np.testing.assert_array_equal(result, [1, 2, 3])
+
+
+def test_flatten_predictions_leaves_1d_array_unchanged():
+    original = np.array([1, 2, 3])
+
+    result = _flatten_predictions(original)
+
+    assert result.shape == (3,)
+    np.testing.assert_array_equal(result, original)
+
+
+def test_handles_catboost_style_2d_column_vector_predictions():
+    """Regression test: CatBoost's multiclass predict() returns
+    predictions shaped (n_samples, 1) instead of a flat 1D array --
+    evaluate_classifier must not crash on that shape (previously:
+    `TypeError: unhashable type: 'list'` from `set(y_pred.tolist())` on a
+    list of one-element lists)."""
+    y_true = np.array(["normal", "dos", "probe", "normal"])
+    y_pred = np.array([["normal"], ["dos"], ["dos"], ["normal"]], dtype=object)
+
+    metrics = evaluate_classifier(y_true, y_pred)
+
+    assert metrics["accuracy"] == 0.75
+    assert metrics["labels"] == ["dos", "normal", "probe"]
+
+
+def test_column_vector_predictions_match_equivalent_flat_predictions():
+    """Flattening changes representation, never the result."""
+    y_true = [0, 1, 2, 0, 1, 2]
+    y_pred_flat = [0, 1, 2, 0, 1, 1]
+    y_pred_columnar = np.array(y_pred_flat).reshape(-1, 1)
+
+    flat_metrics = evaluate_classifier(y_true, y_pred_flat)
+    columnar_metrics = evaluate_classifier(y_true, y_pred_columnar)
+
+    assert flat_metrics == columnar_metrics
 
 
 def test_scalar_metrics_excludes_nested_structures():
