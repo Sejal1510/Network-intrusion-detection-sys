@@ -8,6 +8,7 @@ from nids.api.schemas import (
     ModelInfoResponse,
     PredictRequest,
     PredictResponse,
+    ServedRunInfo,
 )
 from nids.data.schema import CATEGORICAL_COLUMNS, FEATURE_COLUMNS
 
@@ -48,15 +49,28 @@ def test_predict_request_rejects_unknown_extra_field():
         PredictRequest(**record)
 
 
-def test_predict_response_probabilities_default_to_none():
-    response = PredictResponse(prediction=1)
+def test_predict_response_hybrid_fields_default_to_none():
+    response = PredictResponse(prediction=1, severity="low")
+
     assert response.probabilities is None
+    assert response.confidence is None
+    assert response.attack_category is None
+    assert response.anomaly_score is None
+    assert response.is_anomaly is None
+
+
+def test_predict_response_requires_severity():
+    with pytest.raises(ValidationError):
+        PredictResponse(prediction=1)
 
 
 def test_batch_predict_response_round_trips():
     batch = BatchPredictResponse(
         summary=BatchPredictSummary(total_records=2, prediction_counts={"0": 1, "1": 1}),
-        results=[PredictResponse(prediction=0), PredictResponse(prediction=1)],
+        results=[
+            PredictResponse(prediction=0, severity="low"),
+            PredictResponse(prediction=1, severity="high"),
+        ],
     )
     assert len(batch.results) == 2
     assert batch.summary.total_records == 2
@@ -76,3 +90,20 @@ def test_model_info_response_shape():
         metadata={"run_id": "run-1"},
     )
     assert info.metrics["accuracy"] == 0.98
+    assert info.anomaly_detector is None
+
+
+def test_model_info_response_with_anomaly_detector():
+    info = ModelInfoResponse(
+        run_id="run-1",
+        model_name="random_forest",
+        metrics={"accuracy": 0.98},
+        metadata={},
+        anomaly_detector=ServedRunInfo(
+            run_id="anomaly-run-1",
+            model_name="isolation_forest",
+            metrics={"accuracy": 0.9},
+            metadata={},
+        ),
+    )
+    assert info.anomaly_detector.run_id == "anomaly-run-1"

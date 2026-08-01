@@ -20,6 +20,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the NIDS inference API.")
     parser.add_argument("--run-id", required=True, help="run_id (under --artifact-root) to serve")
     parser.add_argument(
+        "--anomaly-run-id",
+        default=None,
+        help="optional run_id of an anomaly detector (e.g. isolation_forest) to serve "
+        "alongside --run-id for hybrid detection",
+    )
+    parser.add_argument(
         "--artifact-root",
         default=str(DEFAULT_ARTIFACT_ROOT),
         help="directory containing training run outputs",
@@ -30,6 +36,7 @@ def main() -> int:
 
     config = ServingConfig(
         run_id=args.run_id,
+        anomaly_run_id=args.anomaly_run_id,
         artifact_root=Path(args.artifact_root),
         host=args.host,
         port=args.port,

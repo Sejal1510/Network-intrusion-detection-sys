@@ -55,4 +55,36 @@ def test_cli_main_loads_pinned_run_and_starts_server(trained_run_dir, monkeypatc
     assert exit_code == 0
     assert isinstance(calls["app"], FastAPI)
     assert calls["app"].state.served_ensemble.classifier.run_id == "cli-fixture-run"
+    assert calls["app"].state.served_ensemble.anomaly_detector is None
     assert calls["port"] == 9000
+
+
+def test_cli_main_loads_optional_anomaly_run_id(fixture_df, trained_run_dir, monkeypatch):
+    anomaly_config = TrainingConfig(
+        model_name="isolation_forest",
+        artifact_root=trained_run_dir,
+        run_name="cli-anomaly-run",
+    )
+    run_training(anomaly_config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--anomaly-run-id",
+            "cli-anomaly-run",
+            "--artifact-root",
+            str(trained_run_dir),
+        ],
+    )
+
+    exit_code = cli_module.main()
+
+    assert exit_code == 0
+    ensemble = calls["app"].state.served_ensemble
+    assert ensemble.anomaly_detector is not None
+    assert ensemble.anomaly_detector.run_id == "cli-anomaly-run"

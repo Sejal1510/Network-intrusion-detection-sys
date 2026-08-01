@@ -35,6 +35,32 @@ def client(fixture_df, tmp_path):
 
 
 @pytest.fixture
+def hybrid_client(fixture_df, tmp_path):
+    classifier_config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        artifact_root=tmp_path / "runs",
+        run_name="app-fixture-run",
+    )
+    run_training(classifier_config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+
+    anomaly_config = TrainingConfig(
+        model_name="isolation_forest",
+        artifact_root=tmp_path / "runs",
+        run_name="anomaly-fixture-run",
+    )
+    run_training(anomaly_config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+
+    serving_config = ServingConfig(
+        run_id="app-fixture-run",
+        anomaly_run_id="anomaly-fixture-run",
+        artifact_root=tmp_path / "runs",
+    )
+    app = create_app(serving_config)
+    return TestClient(app)
+
+
+@pytest.fixture
 def valid_record(fixture_df) -> dict:
     record = fixture_df.iloc[0].to_dict()
     return {k: record[k] for k in FEATURE_COLUMNS}
@@ -66,6 +92,54 @@ def test_predict_returns_prediction_for_a_valid_record(client, valid_record):
     body = response.json()
     assert body["prediction"] in (0, 1)
     assert body["probabilities"] is not None
+    assert body["severity"] in {"critical", "high", "medium", "low"}
+
+
+def test_predict_classifier_only_leaves_anomaly_fields_null(client, valid_record):
+    """Milestone 2 regression: no --anomaly-run-id means no anomaly fields."""
+    response = client.post("/predict", json=valid_record)
+
+    body = response.json()
+    assert body["anomaly_score"] is None
+    assert body["is_anomaly"] is None
+
+
+def test_model_info_anomaly_detector_is_null_when_not_served(client):
+    response = client.get("/model")
+
+    assert response.json()["anomaly_detector"] is None
+
+
+def test_predict_with_hybrid_serving_populates_anomaly_fields(hybrid_client, valid_record):
+    response = hybrid_client.post("/predict", json=valid_record)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["anomaly_score"] is not None
+    assert 0.0 <= body["anomaly_score"] <= 1.0
+    assert isinstance(body["is_anomaly"], bool)
+    assert body["severity"] in {"critical", "high", "medium", "low"}
+
+
+def test_model_info_reports_anomaly_detector_when_served(hybrid_client):
+    response = hybrid_client.get("/model")
+
+    body = response.json()
+    assert body["anomaly_detector"]["run_id"] == "anomaly-fixture-run"
+    assert body["anomaly_detector"]["model_name"] == "isolation_forest"
+
+
+def test_predict_batch_with_hybrid_serving_populates_anomaly_fields(hybrid_client, fixture_df):
+    csv_bytes = fixture_df.to_csv(index=False).encode("utf-8")
+
+    response = hybrid_client.post(
+        "/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")}
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == len(fixture_df)
+    assert all(r["anomaly_score"] is not None for r in results)
 
 
 def test_predict_rejects_request_missing_a_required_field(client, valid_record):

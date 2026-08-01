@@ -30,6 +30,7 @@ from nids.api.schemas import (
     ModelInfoResponse,
     PredictRequest,
     PredictResponse,
+    ServedRunInfo,
 )
 
 router = APIRouter()
@@ -46,7 +47,15 @@ ServedEnsembleDep = Annotated[ServedEnsemble, Depends(_get_served_ensemble)]
 
 
 def _to_response(result: PredictionResult) -> PredictResponse:
-    return PredictResponse(prediction=result.prediction, probabilities=result.probabilities)
+    return PredictResponse(
+        prediction=result.prediction,
+        probabilities=result.probabilities,
+        confidence=result.confidence,
+        attack_category=result.attack_category,
+        anomaly_score=result.anomaly_score,
+        is_anomaly=result.is_anomaly,
+        severity=result.severity,
+    )
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -58,12 +67,23 @@ def health(request: Request) -> HealthResponse:
 @router.get("/model", response_model=ModelInfoResponse)
 def model_info(served_ensemble: ServedEnsembleDep) -> ModelInfoResponse:
     classifier = served_ensemble.classifier
+    anomaly_detector = served_ensemble.anomaly_detector
     return ModelInfoResponse(
         run_id=classifier.run_id,
         model_name=classifier.metadata.get("model_name", "unknown"),
         label_column=classifier.metadata.get("label_column"),
         metrics=classifier.metrics,
         metadata=classifier.metadata,
+        anomaly_detector=(
+            ServedRunInfo(
+                run_id=anomaly_detector.run_id,
+                model_name=anomaly_detector.metadata.get("model_name", "unknown"),
+                metrics=anomaly_detector.metrics,
+                metadata=anomaly_detector.metadata,
+            )
+            if anomaly_detector is not None
+            else None
+        ),
     )
 
 

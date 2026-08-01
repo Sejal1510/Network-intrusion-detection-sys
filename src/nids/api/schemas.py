@@ -29,6 +29,11 @@ PredictRequest = create_model(
 class PredictResponse(BaseModel):
     prediction: Any
     probabilities: dict[str, float] | None = None
+    confidence: float | None = None
+    attack_category: str | None = None
+    anomaly_score: float | None = None
+    is_anomaly: bool | None = None
+    severity: str
 
 
 class BatchPredictSummary(BaseModel):
@@ -46,9 +51,17 @@ class HealthResponse(BaseModel):
     model_loaded: bool
 
 
+class ServedRunInfo(BaseModel):
+    run_id: str
+    model_name: str
+    metrics: dict[str, Any]
+    metadata: dict[str, Any]
+
+
 class ModelInfoResponse(BaseModel):
     run_id: str
     model_name: str
     label_column: str | None = None
     metrics: dict[str, Any]
     metadata: dict[str, Any]
+    anomaly_detector: ServedRunInfo | None = None
