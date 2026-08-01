@@ -22,7 +22,7 @@ from pandas.errors import EmptyDataError, ParserError
 
 from nids.api.config import ServingConfig
 from nids.api.inference import PredictionResult, predict_batch, predict_one
-from nids.api.model_loader import ServedModel, load_served_model
+from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.schemas import (
     BatchPredictResponse,
     BatchPredictSummary,
@@ -35,14 +35,14 @@ from nids.api.schemas import (
 router = APIRouter()
 
 
-def _get_served_model(request: Request) -> ServedModel:
-    served_model = getattr(request.app.state, "served_model", None)
-    if served_model is None:
+def _get_served_ensemble(request: Request) -> ServedEnsemble:
+    served_ensemble = getattr(request.app.state, "served_ensemble", None)
+    if served_ensemble is None:
         raise HTTPException(status_code=503, detail="No model is loaded.")
-    return served_model
+    return served_ensemble
 
 
-ServedModelDep = Annotated[ServedModel, Depends(_get_served_model)]
+ServedEnsembleDep = Annotated[ServedEnsemble, Depends(_get_served_ensemble)]
 
 
 def _to_response(result: PredictionResult) -> PredictResponse:
@@ -51,25 +51,26 @@ def _to_response(result: PredictionResult) -> PredictResponse:
 
 @router.get("/health", response_model=HealthResponse)
 def health(request: Request) -> HealthResponse:
-    served_model = getattr(request.app.state, "served_model", None)
-    return HealthResponse(status="ok", model_loaded=served_model is not None)
+    served_ensemble = getattr(request.app.state, "served_ensemble", None)
+    return HealthResponse(status="ok", model_loaded=served_ensemble is not None)
 
 
 @router.get("/model", response_model=ModelInfoResponse)
-def model_info(served_model: ServedModelDep) -> ModelInfoResponse:
+def model_info(served_ensemble: ServedEnsembleDep) -> ModelInfoResponse:
+    classifier = served_ensemble.classifier
     return ModelInfoResponse(
-        run_id=served_model.run_id,
-        model_name=served_model.metadata.get("model_name", "unknown"),
-        label_column=served_model.metadata.get("label_column"),
-        metrics=served_model.metrics,
-        metadata=served_model.metadata,
+        run_id=classifier.run_id,
+        model_name=classifier.metadata.get("model_name", "unknown"),
+        label_column=classifier.metadata.get("label_column"),
+        metrics=classifier.metrics,
+        metadata=classifier.metadata,
     )
 
 
 @router.post("/predict", response_model=PredictResponse)
-def predict(payload: PredictRequest, served_model: ServedModelDep) -> PredictResponse:
+def predict(payload: PredictRequest, served_ensemble: ServedEnsembleDep) -> PredictResponse:
     try:
-        result = predict_one(served_model, payload.model_dump())
+        result = predict_one(served_ensemble, payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _to_response(result)
@@ -77,7 +78,7 @@ def predict(payload: PredictRequest, served_model: ServedModelDep) -> PredictRes
 
 @router.post("/predict/batch", response_model=BatchPredictResponse)
 async def predict_batch_csv(
-    served_model: ServedModelDep, file: Annotated[UploadFile, File(...)]
+    served_ensemble: ServedEnsembleDep, file: Annotated[UploadFile, File(...)]
 ) -> BatchPredictResponse:
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a .csv file.")
@@ -89,7 +90,7 @@ async def predict_batch_csv(
         raise HTTPException(status_code=400, detail=f"Could not parse CSV: {exc}") from exc
 
     try:
-        results = predict_batch(served_model, df)
+        results = predict_batch(served_ensemble, df)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -105,12 +106,12 @@ async def predict_batch_csv(
 
 
 def create_app(config: ServingConfig) -> FastAPI:
-    """Build a fully wired app serving the run pinned by `config`.
+    """Build a fully wired app serving the run(s) pinned by `config`.
 
     Loading happens here rather than lazily on first request, so a bad
     run_id or corrupt run directory fails at startup.
     """
     app = FastAPI(title="NIDS Inference API")
-    app.state.served_model = load_served_model(config)
+    app.state.served_ensemble = load_served_ensemble(config)
     app.include_router(router)
     return app

@@ -54,5 +54,5 @@ def test_cli_main_loads_pinned_run_and_starts_server(trained_run_dir, monkeypatc
 
     assert exit_code == 0
     assert isinstance(calls["app"], FastAPI)
-    assert calls["app"].state.served_model.run_id == "cli-fixture-run"
+    assert calls["app"].state.served_ensemble.classifier.run_id == "cli-fixture-run"
     assert calls["port"] == 9000
