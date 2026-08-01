@@ -1,0 +1,62 @@
+{
+  "dos": {
+    "tactic": "Impact",
+    "techniques": [
+      {
+        "id": "T1498",
+        "name": "Network Denial of Service",
+        "url": "https://attack.mitre.org/techniques/T1498/"
+      },
+      {
+        "id": "T1499",
+        "name": "Endpoint Denial of Service",
+        "url": "https://attack.mitre.org/techniques/T1499/"
+      }
+    ]
+  },
+  "probe": {
+    "tactic": "Reconnaissance",
+    "techniques": [
+      {
+        "id": "T1595",
+        "name": "Active Scanning",
+        "url": "https://attack.mitre.org/techniques/T1595/"
+      },
+      {
+        "id": "T1046",
+        "name": "Network Service Discovery",
+        "url": "https://attack.mitre.org/techniques/T1046/"
+      }
+    ]
+  },
+  "r2l": {
+    "tactic": "Initial Access",
+    "techniques": [
+      {
+        "id": "T1110",
+        "name": "Brute Force",
+        "url": "https://attack.mitre.org/techniques/T1110/"
+      },
+      {
+        "id": "T1078",
+        "name": "Valid Accounts",
+        "url": "https://attack.mitre.org/techniques/T1078/"
+      }
+    ]
+  },
+  "u2r": {
+    "tactic": "Privilege Escalation",
+    "techniques": [
+      {
+        "id": "T1068",
+        "name": "Exploitation for Privilege Escalation",
+        "url": "https://attack.mitre.org/techniques/T1068/"
+      },
+      {
+        "id": "T1548",
+        "name": "Abuse Elevation Control Mechanism",
+        "url": "https://attack.mitre.org/techniques/T1548/"
+      }
+    ]
+  }
+}
