@@ -15,6 +15,8 @@ from typing import Any, Protocol
 from catboost import CatBoostClassifier
 from sklearn.ensemble import RandomForestClassifier
 
+from nids.models.anomaly import IsolationForestClassifier
+
 
 class Classifier(Protocol):
     """The minimal surface the training pipeline relies on. Any registered
@@ -45,9 +47,14 @@ def _build_random_forest(random_state: int, **hyperparams: Any) -> RandomForestC
     return RandomForestClassifier(**params)
 
 
+def _build_isolation_forest(random_state: int, **hyperparams: Any) -> IsolationForestClassifier:
+    return IsolationForestClassifier(random_state=random_state, **hyperparams)
+
+
 MODEL_REGISTRY: dict[str, ModelFactory] = {
     "catboost": _build_catboost,
     "random_forest": _build_random_forest,
+    "isolation_forest": _build_isolation_forest,
 }
 
 
