@@ -30,6 +30,13 @@ class ServingConfig:
     artifact_root: Path = DEFAULT_ARTIFACT_ROOT
     host: str = "0.0.0.0"
     port: int = 8000
+    # Opt-in persistence (nids.api.store): unset means zero DB writes and
+    # zero behavior change from Milestone 4. Set to e.g.
+    # "sqlite:///history.db" to persist every prediction/alert.
+    database_url: str | None = None
+    # Minimum RiskScore.score (0-100) that generates an Alert (see
+    # nids.api.alerts). Most predictions should not become alerts.
+    alert_threshold: float = 70.0
 
     @property
     def run_dir(self) -> Path:

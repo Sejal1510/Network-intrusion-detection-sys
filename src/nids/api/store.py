@@ -1,0 +1,396 @@
+"""Persistence: SQLAlchemy-backed prediction/alert history, entirely
+opt-in (see `nids.api.config.ServingConfig.database_url`) -- `None` (the
+default) means zero DB writes and zero behavior change from Milestone 4.
+
+Reuses SQLite the same way `nids.training`'s MLflow tracking already does
+(`TrainingConfig.tracking_uri` defaults to `sqlite:///mlflow.db`); moving
+to Postgres later is a `DATABASE_URL` change, not an application rewrite
+-- see `docs/DATABASE.md` for the full justification.
+
+Stores the dataclasses `nids.api.inference`/`explain`/`risk`/`mitre`/
+`alerts` already produce -- this module adds no new domain logic, only a
+place to put what already exists. Repository functions return plain,
+already-detached dataclasses (`PredictionRecordView`/`AlertRecordView`),
+never raw ORM instances, so callers never touch a closed SQLAlchemy
+session by accident.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import DateTime, Float, ForeignKey, String, create_engine, func, select
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, joinedload, mapped_column, relationship
+from sqlalchemy.types import JSON
+
+from nids.api.alerts import Alert
+from nids.api.explain import Explanation
+from nids.api.inference import PredictionResult
+from nids.api.mitre import MitreMapping
+from nids.api.risk import RiskScore
+
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class PredictionRecord(Base):
+    __tablename__ = "predictions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    run_id: Mapped[str] = mapped_column(String)
+    anomaly_run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    label_column: Mapped[str] = mapped_column(String)
+    prediction: Mapped[str] = mapped_column(String)
+    probabilities: Mapped[dict[str, float] | None] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    attack_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    anomaly_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_anomaly: Mapped[bool | None] = mapped_column(nullable=True)
+    severity: Mapped[str] = mapped_column(String)
+    risk_score: Mapped[float] = mapped_column(Float)
+    risk_factors: Mapped[dict[str, float]] = mapped_column(JSON)
+    mitre: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    raw_record: Mapped[dict[str, Any]] = mapped_column(JSON)
+    source: Mapped[str] = mapped_column(String, default="api")
+
+    explanation: Mapped[ExplanationRecord | None] = relationship(
+        back_populates="prediction", uselist=False, cascade="all, delete-orphan"
+    )
+    alerts: Mapped[list[AlertRecord]] = relationship(
+        back_populates="prediction", cascade="all, delete-orphan"
+    )
+
+
+class ExplanationRecord(Base):
+    __tablename__ = "explanations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    prediction_id: Mapped[str] = mapped_column(ForeignKey("predictions.id"), unique=True)
+    base_value: Mapped[float] = mapped_column(Float)
+    top_features: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    summary: Mapped[str] = mapped_column(String)
+
+    prediction: Mapped[PredictionRecord] = relationship(back_populates="explanation")
+
+
+class AlertRecord(Base):
+    __tablename__ = "alerts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # == Alert.alert_id
+    prediction_id: Mapped[str] = mapped_column(ForeignKey("predictions.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    level: Mapped[str] = mapped_column(String)
+    title: Mapped[str] = mapped_column(String)
+    message: Mapped[str] = mapped_column(String)
+    risk_score: Mapped[float] = mapped_column(Float)
+    attack_category: Mapped[str | None] = mapped_column(String, nullable=True)
+    mitre: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    acknowledged: Mapped[bool] = mapped_column(default=False)
+    source: Mapped[str] = mapped_column(String)
+
+    prediction: Mapped[PredictionRecord] = relationship(back_populates="alerts")
+
+
+# ---------------------------------------------------------------------------
+# Read models -- plain dataclasses, safe to use after the session that
+# produced them has closed.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExplanationView:
+    base_value: float
+    top_features: list[dict[str, Any]]
+    summary: str
+
+
+@dataclass(frozen=True)
+class PredictionRecordView:
+    id: str
+    created_at: datetime
+    run_id: str
+    anomaly_run_id: str | None
+    label_column: str
+    prediction: str
+    probabilities: dict[str, float] | None
+    confidence: float | None
+    attack_category: str | None
+    anomaly_score: float | None
+    is_anomaly: bool | None
+    severity: str
+    risk_score: float
+    risk_factors: dict[str, float]
+    mitre: dict[str, Any] | None
+    raw_record: dict[str, Any]
+    source: str
+    explanation: ExplanationView | None
+
+
+@dataclass(frozen=True)
+class AlertRecordView:
+    id: str
+    prediction_id: str
+    created_at: datetime
+    level: str
+    title: str
+    message: str
+    risk_score: float
+    attack_category: str | None
+    mitre: dict[str, Any] | None
+    acknowledged: bool
+    source: str
+
+
+@dataclass(frozen=True)
+class Page:
+    items: list[Any]
+    total: int
+    limit: int
+    offset: int
+
+
+def _prediction_to_view(record: PredictionRecord) -> PredictionRecordView:
+    explanation = (
+        ExplanationView(
+            base_value=record.explanation.base_value,
+            top_features=record.explanation.top_features,
+            summary=record.explanation.summary,
+        )
+        if record.explanation is not None
+        else None
+    )
+    return PredictionRecordView(
+        id=record.id,
+        created_at=record.created_at,
+        run_id=record.run_id,
+        anomaly_run_id=record.anomaly_run_id,
+        label_column=record.label_column,
+        prediction=record.prediction,
+        probabilities=record.probabilities,
+        confidence=record.confidence,
+        attack_category=record.attack_category,
+        anomaly_score=record.anomaly_score,
+        is_anomaly=record.is_anomaly,
+        severity=record.severity,
+        risk_score=record.risk_score,
+        risk_factors=record.risk_factors,
+        mitre=record.mitre,
+        raw_record=record.raw_record,
+        source=record.source,
+        explanation=explanation,
+    )
+
+
+def _alert_to_view(record: AlertRecord) -> AlertRecordView:
+    return AlertRecordView(
+        id=record.id,
+        prediction_id=record.prediction_id,
+        created_at=record.created_at,
+        level=record.level,
+        title=record.title,
+        message=record.message,
+        risk_score=record.risk_score,
+        attack_category=record.attack_category,
+        mitre=record.mitre,
+        acknowledged=record.acknowledged,
+        source=record.source,
+    )
+
+
+def _mitre_to_dict(mitre: MitreMapping | None) -> dict[str, Any] | None:
+    if mitre is None:
+        return None
+    return {
+        "tactic": mitre.tactic,
+        "techniques": [dataclasses.asdict(t) for t in mitre.techniques],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Engine setup
+# ---------------------------------------------------------------------------
+
+
+def create_db_engine(database_url: str) -> Engine:
+    """Create the engine and ensure every table exists.
+
+    `Base.metadata.create_all` (not Alembic) is deliberate for now -- there
+    is no production data yet to migrate; see docs/DATABASE.md for when
+    to introduce migration tooling instead.
+    """
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    return engine
+
+
+# ---------------------------------------------------------------------------
+# Writes
+# ---------------------------------------------------------------------------
+
+
+def save_prediction(
+    engine: Engine,
+    result: PredictionResult,
+    risk_score: RiskScore,
+    mitre: MitreMapping | None,
+    raw_record: dict[str, Any],
+    run_id: str,
+    label_column: str,
+    anomaly_run_id: str | None = None,
+    explanation: Explanation | None = None,
+    source: str = "api",
+) -> str:
+    """Persist one prediction (and its explanation, if given). Returns the
+    new prediction's id."""
+    record = PredictionRecord(
+        run_id=run_id,
+        anomaly_run_id=anomaly_run_id,
+        label_column=label_column,
+        prediction=str(result.prediction),
+        probabilities=result.probabilities,
+        confidence=result.confidence,
+        attack_category=result.attack_category,
+        anomaly_score=result.anomaly_score,
+        is_anomaly=result.is_anomaly,
+        severity=result.severity,
+        risk_score=risk_score.score,
+        risk_factors=risk_score.factors,
+        mitre=_mitre_to_dict(mitre),
+        raw_record=raw_record,
+        source=source,
+    )
+    if explanation is not None:
+        record.explanation = ExplanationRecord(
+            base_value=explanation.base_value,
+            top_features=[dataclasses.asdict(f) for f in explanation.top_features],
+            summary=explanation.summary,
+        )
+
+    with Session(engine) as session:
+        session.add(record)
+        session.commit()
+        return record.id
+
+
+def save_alert(engine: Engine, prediction_id: str, alert: Alert) -> str:
+    record = AlertRecord(
+        id=alert.alert_id,
+        prediction_id=prediction_id,
+        created_at=alert.created_at,
+        level=alert.level,
+        title=alert.title,
+        message=alert.message,
+        risk_score=alert.risk_score,
+        attack_category=alert.attack_category,
+        mitre=_mitre_to_dict(alert.mitre),
+        acknowledged=False,
+        source=alert.source,
+    )
+    with Session(engine) as session:
+        session.add(record)
+        session.commit()
+        return record.id
+
+
+# ---------------------------------------------------------------------------
+# Reads
+# ---------------------------------------------------------------------------
+
+
+def get_prediction(engine: Engine, prediction_id: str) -> PredictionRecordView | None:
+    with Session(engine) as session:
+        stmt = (
+            select(PredictionRecord)
+            .options(joinedload(PredictionRecord.explanation))
+            .where(PredictionRecord.id == prediction_id)
+        )
+        record = session.scalars(stmt).unique().one_or_none()
+        return _prediction_to_view(record) if record is not None else None
+
+
+def get_alert(engine: Engine, alert_id: str) -> AlertRecordView | None:
+    with Session(engine) as session:
+        record = session.get(AlertRecord, alert_id)
+        return _alert_to_view(record) if record is not None else None
+
+
+def list_predictions(
+    engine: Engine,
+    severity: str | None = None,
+    attack_category: str | None = None,
+    min_risk_score: float | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> Page:
+    with Session(engine) as session:
+        stmt = select(PredictionRecord)
+        if severity is not None:
+            stmt = stmt.where(PredictionRecord.severity == severity)
+        if attack_category is not None:
+            stmt = stmt.where(PredictionRecord.attack_category == attack_category)
+        if min_risk_score is not None:
+            stmt = stmt.where(PredictionRecord.risk_score >= min_risk_score)
+        if start_date is not None:
+            stmt = stmt.where(PredictionRecord.created_at >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(PredictionRecord.created_at <= end_date)
+
+        total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = session.scalars(
+            stmt.order_by(PredictionRecord.created_at.desc()).limit(limit).offset(offset)
+        ).all()
+        return Page(items=[_prediction_to_view(r) for r in rows], total=total, limit=limit, offset=offset)
+
+
+def list_alerts(
+    engine: Engine,
+    level: str | None = None,
+    acknowledged: bool | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> Page:
+    with Session(engine) as session:
+        stmt = select(AlertRecord)
+        if level is not None:
+            stmt = stmt.where(AlertRecord.level == level)
+        if acknowledged is not None:
+            stmt = stmt.where(AlertRecord.acknowledged == acknowledged)
+        if start_date is not None:
+            stmt = stmt.where(AlertRecord.created_at >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(AlertRecord.created_at <= end_date)
+
+        total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = session.scalars(
+            stmt.order_by(AlertRecord.created_at.desc()).limit(limit).offset(offset)
+        ).all()
+        return Page(items=[_alert_to_view(r) for r in rows], total=total, limit=limit, offset=offset)
+
+
+def acknowledge_alert(engine: Engine, alert_id: str) -> AlertRecordView | None:
+    """Idempotent: acknowledging an already-acknowledged alert is a no-op
+    that still returns its current (acknowledged) state."""
+    with Session(engine) as session:
+        record = session.get(AlertRecord, alert_id)
+        if record is None:
+            return None
+        record.acknowledged = True
+        session.commit()
+        return _alert_to_view(record)
