@@ -4,6 +4,8 @@ from pydantic import ValidationError
 from nids.api.schemas import (
     BatchPredictResponse,
     BatchPredictSummary,
+    ExplanationResponse,
+    FeatureContributionResponse,
     HealthResponse,
     ModelInfoResponse,
     PredictRequest,
@@ -57,6 +59,23 @@ def test_predict_response_hybrid_fields_default_to_none():
     assert response.attack_category is None
     assert response.anomaly_score is None
     assert response.is_anomaly is None
+    assert response.explanation is None
+
+
+def test_explanation_response_round_trips():
+    explanation = ExplanationResponse(
+        base_value=0.1,
+        top_features=[
+            FeatureContributionResponse(
+                feature="service", value="http", contribution=0.42, direction="positive"
+            ),
+        ],
+        summary="Predicted 1 primarily due to: service='http' (+0.42).",
+    )
+    response = PredictResponse(prediction=1, severity="high", explanation=explanation)
+
+    assert response.explanation.top_features[0].feature == "service"
+    assert response.explanation.base_value == 0.1
 
 
 def test_predict_response_requires_severity():

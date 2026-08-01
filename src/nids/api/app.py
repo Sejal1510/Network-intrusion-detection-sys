@@ -17,15 +17,18 @@ import io
 from typing import Annotated
 
 import pandas as pd
-from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pandas.errors import EmptyDataError, ParserError
 
 from nids.api.config import ServingConfig
+from nids.api.explain import Explanation, explain_batch, explain_one
 from nids.api.inference import PredictionResult, predict_batch, predict_one
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.schemas import (
     BatchPredictResponse,
     BatchPredictSummary,
+    ExplanationResponse,
+    FeatureContributionResponse,
     HealthResponse,
     ModelInfoResponse,
     PredictRequest,
@@ -46,7 +49,22 @@ def _get_served_ensemble(request: Request) -> ServedEnsemble:
 ServedEnsembleDep = Annotated[ServedEnsemble, Depends(_get_served_ensemble)]
 
 
-def _to_response(result: PredictionResult) -> PredictResponse:
+def _to_explanation_response(explanation: Explanation) -> ExplanationResponse:
+    return ExplanationResponse(
+        base_value=explanation.base_value,
+        top_features=[
+            FeatureContributionResponse(
+                feature=f.feature, value=f.value, contribution=f.contribution, direction=f.direction
+            )
+            for f in explanation.top_features
+        ],
+        summary=explanation.summary,
+    )
+
+
+def _to_response(
+    result: PredictionResult, explanation: Explanation | None = None
+) -> PredictResponse:
     return PredictResponse(
         prediction=result.prediction,
         probabilities=result.probabilities,
@@ -55,6 +73,7 @@ def _to_response(result: PredictionResult) -> PredictResponse:
         anomaly_score=result.anomaly_score,
         is_anomaly=result.is_anomaly,
         severity=result.severity,
+        explanation=_to_explanation_response(explanation) if explanation is not None else None,
     )
 
 
@@ -87,18 +106,30 @@ def model_info(served_ensemble: ServedEnsembleDep) -> ModelInfoResponse:
     )
 
 
+_EXPLAIN_QUERY = Query(False, description="Include a SHAP-based explanation of the classifier's prediction.")
+
+
 @router.post("/predict", response_model=PredictResponse)
-def predict(payload: PredictRequest, served_ensemble: ServedEnsembleDep) -> PredictResponse:
+def predict(
+    payload: PredictRequest,
+    served_ensemble: ServedEnsembleDep,
+    explain: bool = _EXPLAIN_QUERY,
+) -> PredictResponse:
+    record = payload.model_dump()
     try:
-        result = predict_one(served_ensemble, payload.model_dump())
+        result = predict_one(served_ensemble, record)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _to_response(result)
+
+    explanation = explain_one(served_ensemble, record, result.prediction) if explain else None
+    return _to_response(result, explanation)
 
 
 @router.post("/predict/batch", response_model=BatchPredictResponse)
 async def predict_batch_csv(
-    served_ensemble: ServedEnsembleDep, file: Annotated[UploadFile, File(...)]
+    served_ensemble: ServedEnsembleDep,
+    file: Annotated[UploadFile, File(...)],
+    explain: bool = _EXPLAIN_QUERY,
 ) -> BatchPredictResponse:
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a .csv file.")
@@ -114,6 +145,13 @@ async def predict_batch_csv(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    if explain:
+        explanations: list[Explanation | None] = list(
+            explain_batch(served_ensemble, df, [r.prediction for r in results])
+        )
+    else:
+        explanations = [None] * len(results)
+
     prediction_counts: dict[str, int] = {}
     for result in results:
         key = str(result.prediction)
@@ -121,7 +159,9 @@ async def predict_batch_csv(
 
     return BatchPredictResponse(
         summary=BatchPredictSummary(total_records=len(results), prediction_counts=prediction_counts),
-        results=[_to_response(r) for r in results],
+        results=[
+            _to_response(r, e) for r, e in zip(results, explanations, strict=True)
+        ],
     )
 
 

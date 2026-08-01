@@ -190,3 +190,57 @@ def test_predict_batch_rejects_non_csv_file(client):
     )
 
     assert response.status_code == 400
+
+
+def test_predict_without_explain_param_leaves_explanation_null(client, valid_record):
+    """Milestone 3 regression: default behavior is unaffected by the new
+    explainability layer."""
+    response = client.post("/predict", json=valid_record)
+
+    assert response.json()["explanation"] is None
+
+
+def test_predict_with_explain_true_populates_explanation(client, valid_record):
+    response = client.post("/predict?explain=true", json=valid_record)
+
+    assert response.status_code == 200
+    explanation = response.json()["explanation"]
+    assert explanation is not None
+    assert 0 < len(explanation["top_features"]) <= 10
+    assert isinstance(explanation["summary"], str) and explanation["summary"]
+    for feature in explanation["top_features"]:
+        assert feature["direction"] in {"positive", "negative"}
+
+
+def test_predict_explanation_works_with_hybrid_serving(hybrid_client, valid_record):
+    """The anomaly detector's presence doesn't change what's explained --
+    still the classifier's prediction."""
+    response = hybrid_client.post("/predict?explain=true", json=valid_record)
+
+    assert response.status_code == 200
+    assert response.json()["explanation"] is not None
+
+
+def test_predict_batch_without_explain_param_leaves_explanations_null(client, fixture_df):
+    csv_bytes = fixture_df.to_csv(index=False).encode("utf-8")
+
+    response = client.post(
+        "/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")}
+    )
+
+    assert all(r["explanation"] is None for r in response.json()["results"])
+
+
+def test_predict_batch_with_explain_true_populates_every_result(client, fixture_df):
+    csv_bytes = fixture_df.to_csv(index=False).encode("utf-8")
+
+    response = client.post(
+        "/predict/batch?explain=true",
+        files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == len(fixture_df)
+    assert all(r["explanation"] is not None for r in results)
+    assert all(len(r["explanation"]["top_features"]) > 0 for r in results)

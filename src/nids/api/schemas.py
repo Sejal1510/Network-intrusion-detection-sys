@@ -26,6 +26,19 @@ PredictRequest = create_model(
 """One raw connection record -- field-for-field, `nids.data.schema.FEATURE_COLUMNS`."""
 
 
+class FeatureContributionResponse(BaseModel):
+    feature: str
+    value: Any
+    contribution: float
+    direction: str
+
+
+class ExplanationResponse(BaseModel):
+    base_value: float
+    top_features: list[FeatureContributionResponse]
+    summary: str
+
+
 class PredictResponse(BaseModel):
     prediction: Any
     probabilities: dict[str, float] | None = None
@@ -34,6 +47,7 @@ class PredictResponse(BaseModel):
     anomaly_score: float | None = None
     is_anomaly: bool | None = None
     severity: str
+    explanation: ExplanationResponse | None = None
 
 
 class BatchPredictSummary(BaseModel):
