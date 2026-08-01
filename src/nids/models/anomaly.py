@@ -61,3 +61,12 @@ class IsolationForestClassifier:
     @property
     def classes_(self) -> np.ndarray:
         return np.array([0, 1])
+
+    @property
+    def explainable_model(self) -> IsolationForest:
+        """The inner, unwrapped sklearn estimator, for tools (e.g.
+        `shap.TreeExplainer`, see `nids.api.explain`) that need to
+        introspect the actual tree structure -- this adapter's own
+        `predict`/`predict_proba` translate output spaces in ways such
+        tools can't see through."""
+        return self._model

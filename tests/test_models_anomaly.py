@@ -73,6 +73,16 @@ def test_classes_are_fixed_binary_labels():
     np.testing.assert_array_equal(model.classes_, [0, 1])
 
 
+def test_explainable_model_exposes_the_inner_sklearn_estimator(separable_data):
+    from sklearn.ensemble import IsolationForest
+
+    X_train, _, _ = separable_data
+    model = IsolationForestClassifier(random_state=42).fit(X_train)
+
+    assert isinstance(model.explainable_model, IsolationForest)
+    assert model.explainable_model is model._model
+
+
 def test_same_seed_is_deterministic_on_fit_and_predict(separable_data):
     X_train, X_eval, _ = separable_data
 
