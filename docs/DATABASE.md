@@ -77,10 +77,11 @@ becomes a migration instead of an edit to `create_all()`'s output.
   the relational schema below (see [Schema](#schema)) — a common,
   pragmatic hybrid, not a reason to adopt a document database wholesale.
 - **A time-series database (TimescaleDB, InfluxDB).** Genuinely the right
-  tool once live packet capture (a stated future milestone) produces
-  high-frequency, continuously-arriving data — named here as the credible
-  next step, not adopted now, since nothing in this milestone produces
-  that volume or shape of data yet.
+  tool if the live capture agent (Milestone 6, see
+  [`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md)) ever produces
+  high-frequency, continuously-arriving write volume that outgrows
+  SQLite — named here as the credible next step, not adopted now, since
+  actual measured volume hasn't required it yet.
 - **Elasticsearch.** The industry-standard choice for full-text search at
   SOC/SIEM scale (the "searching" requirement, at scale, is precisely what
   the ELK stack is for) — named as the natural upgrade *when* structured
@@ -103,8 +104,9 @@ Three tables, `src/nids/api/store.py`:
   prediction result (prediction, probabilities, confidence,
   attack_category, anomaly_score, is_anomaly, severity, risk_score +
   factors, mitre mapping), the raw input record, and a `source` tag
-  (`"api"` today; future callers — live capture, a monitoring agent — get
-  their own value here with no schema change).
+  (`"api"` for HTTP callers, `"agent"` for the live capture agent —
+  Milestone 6, see [`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md) — used
+  the schema slot this reserved with no schema change).
 - **`explanations`** — one row per prediction *that had `?explain=true`
   used* (a nullable one-to-one relationship, via foreign key) — kept
   separate rather than columns on `predictions` because most rows won't

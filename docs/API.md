@@ -4,10 +4,12 @@
 is now classified, scored for anomaly, explained on request, given a
 numeric risk score, mapped to MITRE ATT&CK (where possible), and
 threshold-gated into an alert — and, when a database is configured, all
-of it is persisted and queryable via the History API. Live packet
-capture, notification integrations, and threat intel feeds are future
-milestones — see [Future endpoints](#future-endpoints) for how they plug
-into this architecture without restructuring it.
+of it is persisted and queryable via the History API. Live packet capture
+and WebSocket streaming are now done too (Milestone 6 — see
+[`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md)); notification
+integrations and threat intel feeds remain future milestones — see
+[Future endpoints](#future-endpoints) for how they plug into this
+architecture without restructuring it.
 
 ## Architecture
 
@@ -392,18 +394,21 @@ or route, not a restructure of `nids/api`:
   waterfall chart with no backend redesign; `base_value` plus every raw
   feature's contribution sums to the model's own output, which is exactly
   what a waterfall chart needs.
-- **Live packet capture / local monitoring agent.** Per
-  `nids.features.contracts`'s adapter pattern, a capture agent is just
-  another producer of a DataFrame satisfying `FEATURE_COLUMNS` — it calls
-  the same `inference.predict_one`, either in-process as a new module or
-  out-of-process by POSTing to `/predict`. The `source` field already on
-  every persisted prediction/alert (`"api"` today) is exactly where such
-  a caller would identify itself — no schema change needed.
-- **WebSockets / streaming.** FastAPI serves WebSocket routes from the same
-  app alongside REST routes; a streaming route calls `inference.predict_one`
-  per message, or pushes newly-`save_alert`'d `Alert`s to subscribers —
-  `store.py`'s repository functions are already the single write path a
-  streaming layer would hook.
+- **Live packet capture / local monitoring agent — done (Milestone 6).**
+  `nids/agent/` (`capture.py`, `sources.py`, `client.py`, `cli.py`) — a
+  `python -m nids.agent` process capturing local traffic (or replaying a
+  saved `.pcap`) and streaming it to `/agent/ingest`. Exactly the adapter
+  pattern anticipated here: the agent produces raw records satisfying
+  `FEATURE_COLUMNS` and never runs prediction itself; `source="agent"` on
+  every resulting persisted prediction/alert uses the schema slot this
+  bullet reserved, with no schema change needed. Full design in
+  [`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md).
+- **WebSockets / streaming — done (Milestone 6).** `nids/api/ingest.py`
+  (`/agent/ingest`, agent -> server) and `nids/api/broadcast.py`
+  (`/ws/live`, server -> dashboard), connected by `nids/api/bus.py`'s
+  `MessageBus` and `nids/api/worker.py` running the same
+  `inference`/`pipeline` orchestration a `/predict` call uses. See
+  [`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md).
 - **Prediction history / MITRE ATT&CK mapping / Alert engine — done
   (Milestone 5).** `nids/api/store.py` + `history.py`,
   `nids/api/mitre.py`, and `nids/api/alerts.py` respectively. Kept as
