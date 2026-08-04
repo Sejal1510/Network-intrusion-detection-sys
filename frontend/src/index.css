@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens: chart chrome/ink + status palette, taken verbatim from the
+ * dataviz skill's validated reference palette (references/palette.md) --
+ * status colors are fixed and never themed, and severity badges/charts map
+ * onto them by role (low->good, medium->warning, high->serious,
+ * critical->critical), never a separate ad hoc color choice.
+ */
+:root {
+  color-scheme: light;
+  --surface-page: #f9f9f7;
+  --surface-card: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --border-hairline: rgba(11, 11, 11, 0.1);
+  --gridline: #e1e0d9;
+  --axis: #c3c2b7;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --sequential-400: #3987e5;
+  --sequential-450: #2a78d6;
+  --sequential-550: #1c5cab;
+
+  /* Diverging pair (blue<->red) for polarity data, e.g. SHAP contributions. */
+  --diverging-positive: #2a78d6;
+  --diverging-negative: #e34948;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-page: #0d0d0d;
+    --surface-card: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --border-hairline: rgba(255, 255, 255, 0.1);
+    --gridline: #2c2c2a;
+    --axis: #383835;
+    --diverging-positive: #3987e5;
+    --diverging-negative: #e66767;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-page: #0d0d0d;
+  --surface-card: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --border-hairline: rgba(255, 255, 255, 0.1);
+  --gridline: #2c2c2a;
+  --axis: #383835;
+  --diverging-positive: #3987e5;
+  --diverging-negative: #e66767;
+}
+
+body {
+  margin: 0;
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
