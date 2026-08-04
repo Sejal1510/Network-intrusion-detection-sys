@@ -1,7 +1,7 @@
 import pytest
 
 from nids.api import mitre as mitre_module
-from nids.api.mitre import MitreMapping, load_mitre_mapping, map_to_mitre
+from nids.api.mitre import MitreMapping, list_all_mappings, load_mitre_mapping, map_to_mitre
 from nids.data.schema import ATTACK_CATEGORY
 
 
@@ -42,6 +42,30 @@ def test_every_attack_category_taxonomy_value_is_handled():
             assert mapping is None
         else:
             assert mapping is not None
+
+
+def test_list_all_mappings_covers_every_non_normal_category():
+    mappings = list_all_mappings()
+
+    for category in ("dos", "probe", "r2l", "u2r"):
+        assert category in mappings
+        assert isinstance(mappings[category], MitreMapping)
+        assert mappings[category].tactic
+        assert len(mappings[category].techniques) > 0
+
+
+def test_list_all_mappings_excludes_normal():
+    assert "normal" not in list_all_mappings()
+
+
+def test_list_all_mappings_matches_map_to_mitre_per_category():
+    """Both entry points read the same underlying data through the same
+    parsing helper -- no drift between the single-category and
+    list-everything lookups."""
+    mappings = list_all_mappings()
+
+    for category, mapping in mappings.items():
+        assert mapping == map_to_mitre(category)
 
 
 def test_mapping_is_cached_after_first_load(monkeypatch):

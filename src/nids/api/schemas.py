@@ -84,6 +84,7 @@ class BatchPredictResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
+    database_configured: bool
 
 
 class ServedRunInfo(BaseModel):

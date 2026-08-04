@@ -50,6 +50,12 @@ class ServingConfig:
     # explicitly for a deployment where issued-but-unredeemed pairing
     # tokens must survive a restart.
     secret_key: str | None = None
+    # Origins allowed to make cross-origin requests (e.g. a dashboard
+    # dev server on a different port/host). Empty means no CORS
+    # middleware at all -- the safest default, since this API otherwise
+    # has no origin checking of any kind. Tuple (not list) to keep this
+    # dataclass hashable/immutable like every other field here.
+    cors_origins: tuple[str, ...] = ()
 
     @property
     def run_dir(self) -> Path:

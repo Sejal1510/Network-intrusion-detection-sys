@@ -96,6 +96,55 @@ def test_health_reports_model_loaded(client):
     assert body["model_loaded"] is True
 
 
+def test_health_reports_database_not_configured_by_default(client):
+    assert client.get("/health").json()["database_configured"] is False
+
+
+def test_health_reports_database_configured_when_database_url_set(persisted_client):
+    client, _app = persisted_client
+    assert client.get("/health").json()["database_configured"] is True
+
+
+def test_cors_headers_absent_by_default(client):
+    response = client.get("/health", headers={"Origin": "http://localhost:5173"})
+
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_cors_headers_present_when_origin_configured(fixture_df, tmp_path):
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        artifact_root=tmp_path / "runs",
+        run_name="cors-fixture-run",
+    )
+    run_training(config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+
+    serving_config = ServingConfig(
+        run_id="cors-fixture-run",
+        artifact_root=tmp_path / "runs",
+        cors_origins=("http://localhost:5173",),
+    )
+    app = create_app(serving_config)
+    client = TestClient(app)
+
+    response = client.get("/health", headers={"Origin": "http://localhost:5173"})
+
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_get_mitre_returns_full_mapping_table(client):
+    response = client.get("/mitre")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "normal" not in body
+    for category in ("dos", "probe", "r2l", "u2r"):
+        assert category in body
+        assert body[category]["tactic"]
+        assert len(body[category]["techniques"]) > 0
+
+
 def test_model_info_returns_served_run_metadata_and_metrics(client):
     response = client.get("/model")
 

@@ -132,8 +132,14 @@ def test_batch_predict_response_round_trips():
 
 
 def test_health_response_shape():
-    health = HealthResponse(status="ok", model_loaded=True)
+    health = HealthResponse(status="ok", model_loaded=True, database_configured=False)
     assert health.model_loaded is True
+    assert health.database_configured is False
+
+
+def test_health_response_requires_database_configured():
+    with pytest.raises(ValidationError):
+        HealthResponse(status="ok", model_loaded=True)
 
 
 def test_model_info_response_shape():

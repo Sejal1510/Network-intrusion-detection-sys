@@ -23,6 +23,7 @@ from typing import Annotated
 
 import pandas as pd
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pandas.errors import EmptyDataError, ParserError
 
 from nids.api.broadcast import router as broadcast_router
@@ -32,12 +33,15 @@ from nids.api.explain import Explanation, explain_batch
 from nids.api.history import router as history_router
 from nids.api.inference import predict_batch
 from nids.api.ingest import router as ingest_router
+from nids.api.mitre import list_all_mappings
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.pipeline import finish_record, process_record, row_to_json_safe_dict
 from nids.api.schemas import (
     BatchPredictResponse,
     BatchPredictSummary,
     HealthResponse,
+    MitreMappingResponse,
+    MitreTechniqueResponse,
     ModelInfoResponse,
     PredictRequest,
     PredictResponse,
@@ -62,7 +66,28 @@ ServedEnsembleDep = Annotated[ServedEnsemble, Depends(_get_served_ensemble)]
 @router.get("/health", response_model=HealthResponse)
 def health(request: Request) -> HealthResponse:
     served_ensemble = getattr(request.app.state, "served_ensemble", None)
-    return HealthResponse(status="ok", model_loaded=served_ensemble is not None)
+    return HealthResponse(
+        status="ok",
+        model_loaded=served_ensemble is not None,
+        database_configured=getattr(request.app.state, "db_engine", None) is not None,
+    )
+
+
+@router.get("/mitre", response_model=dict[str, MitreMappingResponse])
+def mitre_mappings() -> dict[str, MitreMappingResponse]:
+    """The full ATT&CK category -> tactic/technique table (see
+    nids.api.mitre), so a dashboard can render a reference panel without
+    bundling its own copy of mitre_attack_mapping.json."""
+    return {
+        category: MitreMappingResponse(
+            tactic=mapping.tactic,
+            techniques=[
+                MitreTechniqueResponse(id=t.id, name=t.name, url=t.url)
+                for t in mapping.techniques
+            ],
+        )
+        for category, mapping in list_all_mappings().items()
+    }
 
 
 @router.get("/model", response_model=ModelInfoResponse)
@@ -209,6 +234,16 @@ def create_app(config: ServingConfig) -> FastAPI:
     generated once at startup if not set explicitly.
     """
     app = FastAPI(title="NIDS Inference API", lifespan=_lifespan)
+    if config.cors_origins:
+        # allow_credentials stays off: the dashboard authenticates via a
+        # ?token= query param (see nids.api.broadcast), never cookies, so
+        # there's no session state that needs credentialed CORS.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(config.cors_origins),
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     app.state.served_ensemble = load_served_ensemble(config)
     app.state.serving_config = config
     app.state.db_engine = create_db_engine(config.database_url) if config.database_url else None

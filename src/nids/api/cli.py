@@ -44,6 +44,14 @@ def main() -> int:
         default=70.0,
         help="minimum risk score (0-100) that raises an alert",
     )
+    parser.add_argument(
+        "--cors-origin",
+        action="append",
+        default=[],
+        dest="cors_origins",
+        help="allow this origin for cross-origin requests (repeatable); "
+        "omit entirely for no CORS (default, safest)",
+    )
     args = parser.parse_args()
 
     config = ServingConfig(
@@ -54,6 +62,7 @@ def main() -> int:
         port=args.port,
         database_url=args.database_url,
         alert_threshold=args.alert_threshold,
+        cors_origins=tuple(args.cors_origins),
     )
     app = create_app(config)
 

@@ -50,6 +50,13 @@ def load_mitre_mapping() -> dict[str, Any]:
     return _cached_mapping
 
 
+def _entry_to_mapping(entry: dict[str, Any]) -> MitreMapping:
+    return MitreMapping(
+        tactic=entry["tactic"],
+        techniques=[MitreTechnique(**technique) for technique in entry["techniques"]],
+    )
+
+
 def map_to_mitre(attack_category: str | None) -> MitreMapping | None:
     """Look up a MITRE mapping for an `attack_category` value.
 
@@ -65,7 +72,16 @@ def map_to_mitre(attack_category: str | None) -> MitreMapping | None:
     if entry is None:
         return None
 
-    return MitreMapping(
-        tactic=entry["tactic"],
-        techniques=[MitreTechnique(**technique) for technique in entry["techniques"]],
-    )
+    return _entry_to_mapping(entry)
+
+
+def list_all_mappings() -> dict[str, MitreMapping]:
+    """Every mapped category at once (for a dashboard to show ahead of
+    any prediction, e.g. a static ATT&CK reference panel) -- same
+    `"normal"`-excluded rule as `map_to_mitre`, since `"normal"` never
+    has a mapping."""
+    return {
+        category: _entry_to_mapping(entry)
+        for category, entry in load_mitre_mapping().items()
+        if category != "normal"
+    }

@@ -44,5 +44,9 @@ data/processed/*
 .DS_Store
 Thumbs.db
 
-# Stray artifacts
-package-lock.json
+# Frontend (frontend/, see docs/DASHBOARD.md) -- package-lock.json IS
+# committed (reproducible installs), only build output/deps are ignored
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/

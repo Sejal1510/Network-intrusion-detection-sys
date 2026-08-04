@@ -126,3 +126,42 @@ def test_cli_main_defaults_to_no_database(trained_run_dir, monkeypatch):
     cli_module.main()
 
     assert calls["app"].state.db_engine is None
+
+
+def test_cli_main_wires_cors_origins(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--cors-origin",
+            "http://localhost:5173",
+            "--cors-origin",
+            "http://localhost:4173",
+        ],
+    )
+
+    cli_module.main()
+
+    assert calls["app"].state.serving_config.cors_origins == (
+        "http://localhost:5173",
+        "http://localhost:4173",
+    )
+
+
+def test_cli_main_defaults_to_no_cors_origins(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["nids-api", "--run-id", "cli-fixture-run", "--artifact-root", str(trained_run_dir)],
+    )
+
+    cli_module.main()
+
+    assert calls["app"].state.serving_config.cors_origins == ()

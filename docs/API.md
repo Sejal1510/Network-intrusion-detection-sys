@@ -6,8 +6,10 @@ numeric risk score, mapped to MITRE ATT&CK (where possible), and
 threshold-gated into an alert — and, when a database is configured, all
 of it is persisted and queryable via the History API. Live packet capture
 and WebSocket streaming are now done too (Milestone 6 — see
-[`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md)); notification
-integrations and threat intel feeds remain future milestones — see
+[`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md)), and so is the web
+dashboard that actually consumes all of the above (Milestone 7 — see
+[`docs/DASHBOARD.md`](DASHBOARD.md)); notification integrations and
+threat intel feeds remain future milestones — see
 [Future endpoints](#future-endpoints) for how they plug into this
 architecture without restructuring it.
 
@@ -98,8 +100,12 @@ reports whether a served model is available.
 
 **Response** (`HealthResponse`)
 ```json
-{ "status": "ok", "model_loaded": true }
+{ "status": "ok", "model_loaded": true, "database_configured": true }
 ```
+`database_configured` reports whether `--database-url` was passed at
+startup — a dashboard checks this once instead of discovering it by
+trial request, since `/history/*` and `/ws/live` both `503` without one
+(see [`docs/DASHBOARD.md`](DASHBOARD.md) "Degraded mode").
 
 ### `GET /model`
 
@@ -121,6 +127,25 @@ everything `nids.training.artifacts.load_run` recorded at training time.
     "metrics": { "accuracy": 0.91, "...": "..." },
     "metadata": { "...": "..." }
   }
+}
+```
+
+### `GET /mitre`
+
+The full ATT&CK `attack_category` -> tactic/techniques table at once
+(`nids.api.mitre.list_all_mappings`) — the same data every prediction's
+`mitre` field draws from, but fetchable upfront so a dashboard can render
+a reference panel without waiting on a prediction, and without bundling
+its own copy of `mitre_attack_mapping.json`. `"normal"` is never a key,
+same rule `map_to_mitre` already follows.
+
+**Response** (`dict[str, MitreMappingResponse]`)
+```json
+{
+  "dos": { "tactic": "Impact", "techniques": [{ "id": "T1498", "name": "Network Denial of Service", "url": "https://attack.mitre.org/techniques/T1498/" }] },
+  "probe": { "tactic": "Reconnaissance", "techniques": ["..."] },
+  "r2l": { "tactic": "Initial Access", "techniques": ["..."] },
+  "u2r": { "tactic": "Privilege Escalation", "techniques": ["..."] }
 }
 ```
 
@@ -268,6 +293,23 @@ individual synchronous inserts — fine for investigative or moderate
 batches; see [`docs/DATABASE.md`](DATABASE.md) for when that stops being
 true and what to reach for instead.
 
+## CORS
+
+No `CORSMiddleware` is installed by default — a request from any other
+origin (e.g. a dashboard dev server on `localhost:5173`) is blocked by
+the browser. This is opt-in and empty-by-default on purpose: the API has
+no other origin checking of any kind, so a deployer must name exactly
+which origins to trust rather than the server wildcarding for them.
+Enable it with a repeatable `--cors-origin` flag:
+
+```bash
+python -m nids.api --run-id <run_id> --cors-origin http://localhost:5173
+```
+
+`allow_credentials` stays off regardless — the dashboard authenticates
+via a `?token=` query parameter (see `/ws/live` below), never cookies, so
+there's no session state that needs credentialed CORS.
+
 ## Status codes
 
 | Code | When |
@@ -389,11 +431,13 @@ or route, not a restructure of `nids/api`:
     a different `shap.Explainer` subclass (e.g. `KernelExplainer` with a
     background dataset); `_aggregate_to_raw_features`, `_build_summary`,
     and the schema/route layer are untouched by that addition.
-- **Dashboard visualizations.** `explanation.top_features`
-  (feature/value/contribution/direction) is already shaped for a bar or
-  waterfall chart with no backend redesign; `base_value` plus every raw
-  feature's contribution sums to the model's own output, which is exactly
-  what a waterfall chart needs.
+- **Dashboard visualizations — done (Milestone 7).** `frontend/` — a
+  React + Vite SPA consuming `/ws/live`, `/history/*`, `/predict*`, and
+  `/mitre` exactly as anticipated here: `explanation.top_features`
+  (feature/value/contribution/direction) feeds a bar chart with no
+  backend redesign, and every prediction's `risk_score`/`mitre`/
+  `alert_id` were already shaped for direct display. Full design in
+  [`docs/DASHBOARD.md`](DASHBOARD.md).
 - **Live packet capture / local monitoring agent — done (Milestone 6).**
   `nids/agent/` (`capture.py`, `sources.py`, `client.py`, `cli.py`) — a
   `python -m nids.agent` process capturing local traffic (or replaying a
