@@ -1,0 +1,54 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      NIDS_RUN_ID: ${NIDS_RUN_ID:?set NIDS_RUN_ID to a trained run_id under models/runs -- see docs/DEPLOYMENT.md}
+      NIDS_ANOMALY_RUN_ID: ${NIDS_ANOMALY_RUN_ID:-}
+      NIDS_ARTIFACT_ROOT: /app/models/runs
+      NIDS_DATABASE_URL: sqlite:////data/history.db
+      NIDS_ALERT_THRESHOLD: ${NIDS_ALERT_THRESHOLD:-70}
+      NIDS_CORS_ORIGINS: ${NIDS_CORS_ORIGINS:-http://localhost:8080}
+      NIDS_SECRET_KEY: ${NIDS_SECRET_KEY:?set NIDS_SECRET_KEY to a random string -- see docs/DEPLOYMENT.md}
+    volumes:
+      # Trained runs are produced by `python -m nids.training` on the
+      # host (see docs/DATASET.md) and never baked into the image --
+      # read-only because the API only ever reads a run, never writes one.
+      - ./models/runs:/app/models/runs:ro
+      # Prediction/alert history (nids.api.store) -- a named volume, not
+      # a bind mount, so it survives `docker compose down` without
+      # littering the repo with a history.db file.
+      - nids-history-db:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Vite bakes this into the JS bundle at build time (see
+        # frontend/src/api/client.ts) -- it must be the URL the *browser*
+        # reaches the backend at, not a Docker-network-internal hostname.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  nids-history-db:

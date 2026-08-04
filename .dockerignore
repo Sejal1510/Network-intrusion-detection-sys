@@ -1,0 +1,22 @@
+# Backend image build context -- keep this to exactly what Dockerfile
+# COPYs (pyproject.toml, src/); everything else here would just bloat
+# the build context without ever being copied into the image.
+.git/
+.github/
+.venv/
+frontend/
+legacy/
+docs/
+tests/
+data/
+models/
+mlruns/
+mlflow.db
+mlflow.db-*
+*.pyc
+__pycache__/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+catboost_info/
