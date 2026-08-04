@@ -10,6 +10,26 @@ from nids.training.run import run_training
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd.txt"
 
+_NIDS_ENV_VARS = (
+    "NIDS_RUN_ID",
+    "NIDS_ANOMALY_RUN_ID",
+    "NIDS_ARTIFACT_ROOT",
+    "NIDS_HOST",
+    "NIDS_PORT",
+    "NIDS_DATABASE_URL",
+    "NIDS_ALERT_THRESHOLD",
+    "NIDS_CORS_ORIGINS",
+    "NIDS_SECRET_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_nids_env(monkeypatch):
+    """Every test gets a blank slate regardless of the host shell's own
+    environment -- CLI env-var fallbacks are exercised explicitly per test."""
+    for name in _NIDS_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
 
 @pytest.fixture
 def fixture_df():
@@ -165,3 +185,89 @@ def test_cli_main_defaults_to_no_cors_origins(trained_run_dir, monkeypatch):
     cli_module.main()
 
     assert calls["app"].state.serving_config.cors_origins == ()
+
+
+def test_cli_main_wires_secret_key(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--secret-key",
+            "a-stable-secret",
+        ],
+    )
+
+    cli_module.main()
+
+    assert calls["app"].state.secret_key == "a-stable-secret"
+
+
+def test_cli_main_reads_run_id_from_env(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setenv("NIDS_RUN_ID", "cli-fixture-run")
+    monkeypatch.setenv("NIDS_ARTIFACT_ROOT", str(trained_run_dir))
+    monkeypatch.setattr("sys.argv", ["nids-api"])
+
+    exit_code = cli_module.main()
+
+    assert exit_code == 0
+    assert calls["app"].state.served_ensemble.classifier.run_id == "cli-fixture-run"
+
+
+def test_cli_main_flag_overrides_env_var(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setenv("NIDS_PORT", "9999")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--port",
+            "8500",
+        ],
+    )
+
+    cli_module.main()
+
+    assert calls["app"].state.serving_config.port == 8500
+
+
+def test_cli_main_wires_env_var_database_and_cors_and_threshold(trained_run_dir, tmp_path, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setenv("NIDS_RUN_ID", "cli-fixture-run")
+    monkeypatch.setenv("NIDS_ARTIFACT_ROOT", str(trained_run_dir))
+    monkeypatch.setenv("NIDS_DATABASE_URL", f"sqlite:///{tmp_path / 'history.db'}")
+    monkeypatch.setenv("NIDS_CORS_ORIGINS", "http://localhost:5173, http://localhost:4173")
+    monkeypatch.setenv("NIDS_ALERT_THRESHOLD", "42")
+    monkeypatch.setattr("sys.argv", ["nids-api"])
+
+    cli_module.main()
+
+    config = calls["app"].state.serving_config
+    assert calls["app"].state.db_engine is not None
+    assert config.cors_origins == ("http://localhost:5173", "http://localhost:4173")
+    assert config.alert_threshold == 42.0
+
+
+def test_cli_main_requires_run_id_from_flag_or_env(trained_run_dir, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.argv", ["nids-api", "--artifact-root", str(trained_run_dir)]
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_module.main()
+
+    assert exc_info.value.code == 2
+    assert "--run-id is required" in capsys.readouterr().err
