@@ -194,3 +194,42 @@ def test_list_alerts_filters_by_acknowledged(client, valid_record):
 
     assert unacknowledged["total"] == 0
     assert acknowledged["total"] == 1
+
+
+def test_history_audit_503s_without_database(client_without_db):
+    response = client_without_db.get("/history/audit")
+    assert response.status_code == 503
+
+
+def test_list_audit_events_empty_initially(client):
+    response = client.get("/history/audit")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {"items": [], "total": 0, "limit": 20, "offset": 0}
+
+
+def test_list_audit_events_returns_recorded_events(client, tmp_path):
+    from nids.api import store
+
+    engine = store.create_db_engine(f"sqlite:///{tmp_path / 'history.db'}")
+    store.record_audit_event(engine, event_type="device_paired", actor="127.0.0.1", target_id="device-1")
+
+    body = client.get("/history/audit").json()
+
+    assert body["total"] == 1
+    assert body["items"][0]["event_type"] == "device_paired"
+    assert body["items"][0]["target_id"] == "device-1"
+
+
+def test_list_audit_events_filters_by_event_type_query_param(client, tmp_path):
+    from nids.api import store
+
+    engine = store.create_db_engine(f"sqlite:///{tmp_path / 'history.db'}")
+    store.record_audit_event(engine, event_type="device_paired", actor="127.0.0.1")
+    store.record_audit_event(engine, event_type="device_pair_failed", actor="127.0.0.1")
+
+    body = client.get("/history/audit?event_type=device_pair_failed").json()
+
+    assert body["total"] == 1
+    assert body["items"][0]["event_type"] == "device_pair_failed"

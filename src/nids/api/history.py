@@ -23,16 +23,20 @@ from sqlalchemy.engine import Engine
 from nids.api.schemas import (
     AlertHistoryItem,
     AlertHistoryResponse,
+    AuditEventItem,
+    AuditEventResponse,
     PredictionHistoryItem,
     PredictionHistoryResponse,
 )
 from nids.api.store import (
     AlertRecordView,
+    AuditEventView,
     PredictionRecordView,
     acknowledge_alert,
     get_alert,
     get_prediction,
     list_alerts,
+    list_audit_events,
     list_predictions,
 )
 
@@ -99,6 +103,17 @@ def _to_alert_item(view: AlertRecordView) -> AlertHistoryItem:
         mitre=view.mitre,
         acknowledged=view.acknowledged,
         source=view.source,
+    )
+
+
+def _to_audit_event_item(view: AuditEventView) -> AuditEventItem:
+    return AuditEventItem(
+        id=view.id,
+        created_at=view.created_at,
+        event_type=view.event_type,
+        actor=view.actor,
+        target_id=view.target_id,
+        detail=view.detail,
     )
 
 
@@ -180,3 +195,30 @@ def acknowledge_alert_route(alert_id: str, db_engine: DbEngineDep) -> AlertHisto
     if view is None:
         raise HTTPException(status_code=404, detail=f"No alert found with id {alert_id!r}.")
     return _to_alert_item(view)
+
+
+@router.get("/audit", response_model=AuditEventResponse)
+def list_audit_events_route(
+    db_engine: DbEngineDep,
+    event_type: str | None = None,
+    actor: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    limit: int = _LimitQuery,
+    offset: int = _OffsetQuery,
+) -> AuditEventResponse:
+    page = list_audit_events(
+        db_engine,
+        event_type=event_type,
+        actor=actor,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset,
+    )
+    return AuditEventResponse(
+        items=[_to_audit_event_item(i) for i in page.items],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+    )

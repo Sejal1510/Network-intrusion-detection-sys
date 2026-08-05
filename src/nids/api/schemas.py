@@ -152,6 +152,22 @@ class AlertHistoryResponse(BaseModel):
     offset: int
 
 
+class AuditEventItem(BaseModel):
+    id: str
+    created_at: datetime
+    event_type: str
+    actor: str
+    target_id: str | None
+    detail: str | None
+
+
+class AuditEventResponse(BaseModel):
+    items: list[AuditEventItem]
+    total: int
+    limit: int
+    offset: int
+
+
 class PairingTokenResponse(BaseModel):
     pairing_token: str
     expires_in_seconds: int
