@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from nids.api.app import create_app
 from nids.api.config import ServingConfig
+from nids.api.user_auth import create_session, register_user
 from nids.data import loader
 from nids.data.schema import FEATURE_COLUMNS
 from nids.training.config import TrainingConfig
@@ -112,6 +113,40 @@ def test_pair_exchange_failure_records_device_pair_failed_audit_event(app_with_d
 
     assert page.total == 1
     assert page.items[0].detail
+
+
+def test_pair_exchange_without_login_leaves_device_user_id_none(app_with_db):
+    from nids.api import store
+
+    client = TestClient(app_with_db)
+    token = client.post("/agent/pair").json()["pairing_token"]
+    device_id = client.post(
+        "/agent/pair/exchange", json={"pairing_token": token, "device_name": "ayush-laptop"}
+    ).json()["device_id"]
+
+    page = store.list_devices(app_with_db.state.db_engine)
+    device = next(d for d in page.items if d.id == device_id)
+    assert device.user_id is None
+
+
+def test_pair_exchange_while_logged_in_attaches_user_id(app_with_db):
+    from nids.api import store
+
+    client = TestClient(app_with_db)
+    user = register_user(app_with_db.state.db_engine, "analyst1", "hunter2", "analyst")
+    session = create_session(app_with_db.state.db_engine, user.id, ttl_seconds=3600)
+    headers = {"Authorization": f"Bearer {session.token}"}
+
+    token = client.post("/agent/pair").json()["pairing_token"]
+    device_id = client.post(
+        "/agent/pair/exchange",
+        json={"pairing_token": token, "device_name": "ayush-laptop"},
+        headers=headers,
+    ).json()["device_id"]
+
+    page = store.list_devices(app_with_db.state.db_engine)
+    device = next(d for d in page.items if d.id == device_id)
+    assert device.user_id == user.id
 
 
 def test_pair_returns_429_after_exceeding_pairing_rate_limit(app_with_db):

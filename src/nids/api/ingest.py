@@ -25,6 +25,7 @@ from nids.api.agent_auth import (
     exchange_pairing_token,
     issue_pairing_token,
 )
+from nids.api.auth import OptionalCurrentUserDep
 from nids.api.config import ServingConfig
 from nids.api.schemas import DeviceCredentialResponse, PairingExchangeRequest, PairingTokenResponse
 from nids.api.store import record_audit_event
@@ -67,15 +68,28 @@ def pair(request: Request, _rate_limit: PairingRateLimitDep) -> PairingTokenResp
 
 @router.post("/pair/exchange", response_model=DeviceCredentialResponse)
 def pair_exchange(
-    payload: PairingExchangeRequest, request: Request, _rate_limit: PairingRateLimitDep
+    payload: PairingExchangeRequest,
+    request: Request,
+    _rate_limit: PairingRateLimitDep,
+    current_user: OptionalCurrentUserDep,
 ) -> DeviceCredentialResponse:
     """Redeem a pairing token for a long-lived device credential. Needs a
-    database (the credential is persisted)."""
+    database (the credential is persisted). If the caller carries a
+    valid login session (e.g. a logged-in dashboard tab), the new
+    device's `user_id` is set to that user -- entirely optional, since
+    `exchange_pairing_token`/`register_device` have accepted `user_id`
+    since Milestone 6 with no caller ever populating it. Pairing from an
+    anonymous tab or the live-capture agent's CLI (which never sends a
+    session `Authorization` header) is unaffected."""
     db_engine = _get_db_engine(request)
     client_host = request.client.host if request.client else "unknown"
     try:
         credential = exchange_pairing_token(
-            db_engine, payload.pairing_token, request.app.state.secret_key, payload.device_name
+            db_engine,
+            payload.pairing_token,
+            request.app.state.secret_key,
+            payload.device_name,
+            user_id=current_user.id if current_user is not None else None,
         )
     except ValueError as exc:
         record_audit_event(
