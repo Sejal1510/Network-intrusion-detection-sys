@@ -124,6 +124,29 @@ class DeviceRecord(Base):
     revoked: Mapped[bool] = mapped_column(default=False)
 
 
+class AuditEventRecord(Base):
+    """A security-relevant action: alert acknowledgement, successful/failed
+    device pairing exchange (see `nids.api.history`, `nids.api.ingest`).
+    `actor` is the client IP address that made the request -- there is no
+    real user auth anywhere in this backend yet (see docs/API.md), so IP
+    is the only identity this system can honestly record; a future auth
+    layer replaces this column's meaning, not its shape. Rate-limit
+    *rejections* (`nids.api.rate_limit`) are deliberately never written
+    here -- they go to structured logs instead, so abuse noise can't grow
+    this table unbounded."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    event_type: Mapped[str] = mapped_column(String)
+    actor: Mapped[str] = mapped_column(String)
+    target_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    detail: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # Read models -- plain dataclasses, safe to use after the session that
 # produced them has closed.
@@ -184,6 +207,16 @@ class DeviceRecordView:
     paired_at: datetime
     last_seen_at: datetime | None
     revoked: bool
+
+
+@dataclass(frozen=True)
+class AuditEventView:
+    id: str
+    created_at: datetime
+    event_type: str
+    actor: str
+    target_id: str | None
+    detail: str | None
 
 
 @dataclass(frozen=True)
@@ -252,6 +285,17 @@ def _device_to_view(record: DeviceRecord) -> DeviceRecordView:
         paired_at=record.paired_at,
         last_seen_at=record.last_seen_at,
         revoked=record.revoked,
+    )
+
+
+def _audit_event_to_view(record: AuditEventRecord) -> AuditEventView:
+    return AuditEventView(
+        id=record.id,
+        created_at=record.created_at,
+        event_type=record.event_type,
+        actor=record.actor,
+        target_id=record.target_id,
+        detail=record.detail,
     )
 
 
@@ -489,3 +533,49 @@ def revoke_device(engine: Engine, device_id: str) -> DeviceRecordView | None:
         record.revoked = True
         session.commit()
         return _device_to_view(record)
+
+
+# ---------------------------------------------------------------------------
+# Audit trail (see AuditEventRecord above)
+# ---------------------------------------------------------------------------
+
+
+def record_audit_event(
+    engine: Engine,
+    event_type: str,
+    actor: str,
+    target_id: str | None = None,
+    detail: str | None = None,
+) -> AuditEventView:
+    record = AuditEventRecord(event_type=event_type, actor=actor, target_id=target_id, detail=detail)
+    with Session(engine) as session:
+        session.add(record)
+        session.commit()
+        return _audit_event_to_view(record)
+
+
+def list_audit_events(
+    engine: Engine,
+    event_type: str | None = None,
+    actor: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> Page:
+    with Session(engine) as session:
+        stmt = select(AuditEventRecord)
+        if event_type is not None:
+            stmt = stmt.where(AuditEventRecord.event_type == event_type)
+        if actor is not None:
+            stmt = stmt.where(AuditEventRecord.actor == actor)
+        if start_date is not None:
+            stmt = stmt.where(AuditEventRecord.created_at >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(AuditEventRecord.created_at <= end_date)
+
+        total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = session.scalars(
+            stmt.order_by(AuditEventRecord.created_at.desc()).limit(limit).offset(offset)
+        ).all()
+        return Page(items=[_audit_event_to_view(r) for r in rows], total=total, limit=limit, offset=offset)

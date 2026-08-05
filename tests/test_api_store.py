@@ -356,3 +356,77 @@ def test_list_predictions_filters_by_device_id(engine):
 
     assert page.total == 1
     assert page.items[0].device_id == "device-1"
+
+
+# ---------------------------------------------------------------------------
+# Audit trail
+# ---------------------------------------------------------------------------
+
+
+def test_record_and_list_audit_event_roundtrips(engine):
+    event = store.record_audit_event(engine, event_type="device_paired", actor="127.0.0.1")
+
+    page = store.list_audit_events(engine)
+
+    assert page.total == 1
+    assert page.items[0].id == event.id
+    assert page.items[0].event_type == "device_paired"
+    assert page.items[0].actor == "127.0.0.1"
+    assert page.items[0].target_id is None
+    assert page.items[0].detail is None
+
+
+def test_record_audit_event_with_target_id_and_detail_roundtrips(engine):
+    event = store.record_audit_event(
+        engine,
+        event_type="alert_acknowledged",
+        actor="10.0.0.5",
+        target_id="alert-1",
+        detail="acknowledged via /history/alerts/alert-1/acknowledge",
+    )
+
+    page = store.list_audit_events(engine)
+
+    assert page.items[0].id == event.id
+    assert page.items[0].target_id == "alert-1"
+    assert page.items[0].detail == "acknowledged via /history/alerts/alert-1/acknowledge"
+
+
+def test_list_audit_events_filters_by_event_type(engine):
+    store.record_audit_event(engine, event_type="device_paired", actor="127.0.0.1")
+    store.record_audit_event(engine, event_type="device_pair_failed", actor="127.0.0.1")
+
+    page = store.list_audit_events(engine, event_type="device_pair_failed")
+
+    assert page.total == 1
+    assert page.items[0].event_type == "device_pair_failed"
+
+
+def test_list_audit_events_filters_by_actor(engine):
+    store.record_audit_event(engine, event_type="device_paired", actor="1.1.1.1")
+    store.record_audit_event(engine, event_type="device_paired", actor="2.2.2.2")
+
+    page = store.list_audit_events(engine, actor="2.2.2.2")
+
+    assert page.total == 1
+    assert page.items[0].actor == "2.2.2.2"
+
+
+def test_list_audit_events_paginates(engine):
+    for i in range(5):
+        store.record_audit_event(engine, event_type="device_paired", actor=f"10.0.0.{i}")
+
+    page_one = store.list_audit_events(engine, limit=2, offset=0)
+    page_two = store.list_audit_events(engine, limit=2, offset=2)
+
+    assert page_one.total == 5
+    assert len(page_one.items) == 2
+    assert len(page_two.items) == 2
+    assert {i.id for i in page_one.items}.isdisjoint({i.id for i in page_two.items})
+
+
+def test_list_audit_events_empty_returns_empty_page(engine):
+    page = store.list_audit_events(engine)
+
+    assert page.total == 0
+    assert page.items == []
