@@ -22,7 +22,17 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 import pandas as pd
-from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pandas.errors import EmptyDataError, ParserError
 
@@ -34,6 +44,7 @@ from nids.api.history import router as history_router
 from nids.api.inference import predict_batch
 from nids.api.ingest import router as ingest_router
 from nids.api.logging_config import RequestLoggingMiddleware
+from nids.api.metrics import Metrics, PrometheusMiddleware, create_metrics, metrics_response
 from nids.api.mitre import list_all_mappings
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.pipeline import finish_record, process_record, row_to_json_safe_dict
@@ -72,6 +83,14 @@ def health(request: Request) -> HealthResponse:
         model_loaded=served_ensemble is not None,
         database_configured=getattr(request.app.state, "db_engine", None) is not None,
     )
+
+
+@router.get("/metrics")
+def metrics(request: Request) -> Response:
+    """Prometheus text exposition format (nids.api.metrics) -- request
+    counts/latency, prediction latency, alerts raised. Unauthenticated,
+    same as /health -- see docs/OBSERVABILITY.md."""
+    return metrics_response(request.app.state.metrics)
 
 
 @router.get("/mitre", response_model=dict[str, MitreMappingResponse])
@@ -126,14 +145,16 @@ def predict(
 ) -> PredictResponse:
     record = payload.model_dump()
     config: ServingConfig = request.app.state.serving_config
+    metrics: Metrics = request.app.state.metrics
     try:
-        return process_record(
-            served_ensemble,
-            record,
-            config=config,
-            db_engine=request.app.state.db_engine,
-            explain=explain,
-        )
+        with metrics.prediction_duration_seconds.labels(route="/predict").time():
+            return process_record(
+                served_ensemble,
+                record,
+                config=config,
+                db_engine=request.app.state.db_engine,
+                explain=explain,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -154,8 +175,10 @@ async def predict_batch_csv(
     except (ParserError, EmptyDataError, UnicodeDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse CSV: {exc}") from exc
 
+    metrics: Metrics = request.app.state.metrics
     try:
-        results = predict_batch(served_ensemble, df)
+        with metrics.prediction_duration_seconds.labels(route="/predict/batch").time():
+            results = predict_batch(served_ensemble, df)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -236,6 +259,7 @@ def create_app(config: ServingConfig) -> FastAPI:
     """
     app = FastAPI(title="NIDS Inference API", lifespan=_lifespan)
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(PrometheusMiddleware)
     if config.cors_origins:
         # allow_credentials stays off: the dashboard authenticates via a
         # ?token= query param (see nids.api.broadcast), never cookies, so
@@ -248,6 +272,7 @@ def create_app(config: ServingConfig) -> FastAPI:
         )
     app.state.served_ensemble = load_served_ensemble(config)
     app.state.serving_config = config
+    app.state.metrics = create_metrics()
     app.state.db_engine = create_db_engine(config.database_url) if config.database_url else None
     app.state.bus = create_bus(config.redis_url)
     app.state.secret_key = config.secret_key or secrets.token_urlsafe(32)

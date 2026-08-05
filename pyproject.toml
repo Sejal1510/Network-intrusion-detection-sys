@@ -23,6 +23,7 @@ dependencies = [
     "redis>=5.0",
     "itsdangerous>=2.1",
     "websockets>=13.0",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
