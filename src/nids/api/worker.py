@@ -26,6 +26,7 @@ from sqlalchemy.engine import Engine
 from nids.api.bus import MessageBus
 from nids.api.config import ServingConfig
 from nids.api.inference import PredictionResult
+from nids.api.metrics import Metrics
 from nids.api.model_loader import ServedEnsemble
 from nids.api.pipeline import process_record
 from nids.api.risk import RiskScore
@@ -48,6 +49,7 @@ async def process_flow_message(
     served_ensemble: ServedEnsemble,
     config: ServingConfig,
     db_engine: Engine | None,
+    metrics: Metrics,
 ) -> None:
     """Process one `"flows"`-channel message: run the pipeline, publish
     the result. A single record's failure (an invalid flow, or any other
@@ -76,6 +78,8 @@ async def process_flow_message(
         logger.exception("Unexpected error processing flow record from device %s", device_id)
         return
 
+    if response.alert_id is not None:
+        metrics.alerts_raised_total.labels(source="agent").inc()
     await bus.publish("live", response.model_dump(mode="json"))
 
 
@@ -84,8 +88,9 @@ async def run_worker(
     served_ensemble: ServedEnsemble,
     config: ServingConfig,
     db_engine: Engine | None,
+    metrics: Metrics,
 ) -> None:
     """Runs forever, consuming the `"flows"` channel one message at a
     time."""
     async for message in bus.subscribe("flows"):
-        await process_flow_message(message, bus, served_ensemble, config, db_engine)
+        await process_flow_message(message, bus, served_ensemble, config, db_engine, metrics)

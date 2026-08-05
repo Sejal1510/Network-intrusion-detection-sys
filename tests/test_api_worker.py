@@ -5,6 +5,7 @@ import pytest
 
 from nids.api.bus import InMemoryBus
 from nids.api.config import ServingConfig
+from nids.api.metrics import create_metrics
 from nids.api.model_loader import ServedEnsemble, ServedModel
 from nids.api.worker import explain_only_alert_worthy, process_flow_message, run_worker
 from nids.data import loader
@@ -40,6 +41,11 @@ def valid_record(fixture_df) -> dict:
     return {k: row[k] for k in FEATURE_COLUMNS}
 
 
+@pytest.fixture
+def metrics():
+    return create_metrics()
+
+
 def test_explain_only_alert_worthy_true_at_or_above_threshold():
     from nids.api.risk import RiskScore
 
@@ -54,7 +60,7 @@ def test_explain_only_alert_worthy_false_below_threshold():
     assert explain_only_alert_worthy(None, risk, threshold=70.0) is False
 
 
-async def test_process_flow_message_publishes_result_to_live_channel(served_ensemble, valid_record):
+async def test_process_flow_message_publishes_result_to_live_channel(served_ensemble, valid_record, metrics):
     bus = InMemoryBus()
     config = ServingConfig(run_id="test-run", alert_threshold=0.0)
 
@@ -66,7 +72,7 @@ async def test_process_flow_message_publishes_result_to_live_channel(served_ense
     await asyncio.sleep(0)
 
     await process_flow_message(
-        {"device_id": "device-1", "record": valid_record}, bus, served_ensemble, config, None
+        {"device_id": "device-1", "record": valid_record}, bus, served_ensemble, config, None, metrics
     )
 
     result = await asyncio.wait_for(task, timeout=1)
@@ -74,7 +80,7 @@ async def test_process_flow_message_publishes_result_to_live_channel(served_ense
     assert "risk_score" in result
 
 
-async def test_process_flow_message_explains_only_when_alert_worthy(served_ensemble, valid_record):
+async def test_process_flow_message_explains_only_when_alert_worthy(served_ensemble, valid_record, metrics):
     bus = InMemoryBus()
     low_threshold_config = ServingConfig(run_id="test-run", alert_threshold=0.0)
 
@@ -86,7 +92,12 @@ async def test_process_flow_message_explains_only_when_alert_worthy(served_ensem
     await asyncio.sleep(0)
 
     await process_flow_message(
-        {"device_id": "device-1", "record": valid_record}, bus, served_ensemble, low_threshold_config, None
+        {"device_id": "device-1", "record": valid_record},
+        bus,
+        served_ensemble,
+        low_threshold_config,
+        None,
+        metrics,
     )
 
     result = await asyncio.wait_for(task, timeout=1)
@@ -94,7 +105,28 @@ async def test_process_flow_message_explains_only_when_alert_worthy(served_ensem
     assert result["explanation"] is not None  # alert-worthy -- explained
 
 
-async def test_process_flow_message_skips_explanation_when_not_alert_worthy(served_ensemble, valid_record):
+async def test_process_flow_message_increments_alerts_raised_total_when_alert_worthy(
+    served_ensemble, valid_record, metrics
+):
+    bus = InMemoryBus()
+    config = ServingConfig(run_id="test-run", alert_threshold=0.0)
+
+    async def consume_one():
+        async for message in bus.subscribe("live"):
+            return message
+
+    task = asyncio.create_task(consume_one())
+    await asyncio.sleep(0)
+
+    await process_flow_message(
+        {"device_id": "device-1", "record": valid_record}, bus, served_ensemble, config, None, metrics
+    )
+    await asyncio.wait_for(task, timeout=1)
+
+    assert metrics.alerts_raised_total.labels(source="agent")._value.get() == 1
+
+
+async def test_process_flow_message_skips_explanation_when_not_alert_worthy(served_ensemble, valid_record, metrics):
     bus = InMemoryBus()
     high_threshold_config = ServingConfig(run_id="test-run", alert_threshold=1000.0)
 
@@ -106,15 +138,21 @@ async def test_process_flow_message_skips_explanation_when_not_alert_worthy(serv
     await asyncio.sleep(0)
 
     await process_flow_message(
-        {"device_id": "device-1", "record": valid_record}, bus, served_ensemble, high_threshold_config, None
+        {"device_id": "device-1", "record": valid_record},
+        bus,
+        served_ensemble,
+        high_threshold_config,
+        None,
+        metrics,
     )
 
     result = await asyncio.wait_for(task, timeout=1)
     assert result["alert_id"] is None
     assert result["explanation"] is None
+    assert metrics.alerts_raised_total.labels(source="agent")._value.get() == 0
 
 
-async def test_process_flow_message_drops_invalid_record_without_publishing(served_ensemble):
+async def test_process_flow_message_drops_invalid_record_without_publishing(served_ensemble, metrics):
     bus = InMemoryBus()
     config = ServingConfig(run_id="test-run")
 
@@ -129,7 +167,7 @@ async def test_process_flow_message_drops_invalid_record_without_publishing(serv
     await asyncio.sleep(0)
 
     await process_flow_message(
-        {"device_id": "device-1", "record": {"duration": 0}}, bus, served_ensemble, config, None
+        {"device_id": "device-1", "record": {"duration": 0}}, bus, served_ensemble, config, None, metrics
     )
 
     # nothing should be published for an invalid record; confirm by
@@ -139,7 +177,7 @@ async def test_process_flow_message_drops_invalid_record_without_publishing(serv
     assert published == [{"sentinel": True}]
 
 
-async def test_run_worker_processes_multiple_messages(served_ensemble, valid_record):
+async def test_run_worker_processes_multiple_messages(served_ensemble, valid_record, metrics):
     bus = InMemoryBus()
     config = ServingConfig(run_id="test-run", alert_threshold=1000.0)
 
@@ -151,7 +189,7 @@ async def test_run_worker_processes_multiple_messages(served_ensemble, valid_rec
             if len(received) == 2:
                 return
 
-    worker_task = asyncio.create_task(run_worker(bus, served_ensemble, config, None))
+    worker_task = asyncio.create_task(run_worker(bus, served_ensemble, config, None, metrics))
     consumer_task = asyncio.create_task(consume())
     await asyncio.sleep(0)
 

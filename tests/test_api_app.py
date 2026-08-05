@@ -415,6 +415,34 @@ def test_predict_raises_and_persists_alert_when_threshold_is_low(persisted_clien
     assert alerts.items[0].id == body["alert_id"]
 
 
+def test_predict_increments_alerts_raised_total_when_alert_worthy(persisted_client, valid_record):
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        alert_threshold=0.0,
+    )
+
+    client.post("/predict", json=valid_record)
+
+    assert app.state.metrics.alerts_raised_total.labels(source="api")._value.get() == 1
+
+
+def test_predict_does_not_increment_alerts_raised_total_below_threshold(persisted_client, valid_record):
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        alert_threshold=1000.0,
+    )
+
+    client.post("/predict", json=valid_record)
+
+    assert app.state.metrics.alerts_raised_total.labels(source="api")._value.get() == 0
+
+
 def test_predict_batch_persists_every_row_when_database_configured(persisted_client, fixture_df):
     from nids.api import store
 
@@ -424,3 +452,18 @@ def test_predict_batch_persists_every_row_when_database_configured(persisted_cli
     client.post("/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")})
 
     assert store.list_predictions(app.state.db_engine).total == len(fixture_df)
+
+
+def test_predict_batch_increments_alerts_raised_total_per_alerting_row(persisted_client, fixture_df):
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        alert_threshold=0.0,
+    )
+    csv_bytes = fixture_df.to_csv(index=False).encode("utf-8")
+
+    client.post("/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")})
+
+    assert app.state.metrics.alerts_raised_total.labels(source="api")._value.get() == len(fixture_df)

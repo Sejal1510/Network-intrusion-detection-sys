@@ -148,7 +148,7 @@ def predict(
     metrics: Metrics = request.app.state.metrics
     try:
         with metrics.prediction_duration_seconds.labels(route="/predict").time():
-            return process_record(
+            response = process_record(
                 served_ensemble,
                 record,
                 config=config,
@@ -157,6 +157,9 @@ def predict(
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if response.alert_id is not None:
+        metrics.alerts_raised_total.labels(source="api").inc()
+    return response
 
 
 @router.post("/predict/batch", response_model=BatchPredictResponse)
@@ -202,16 +205,17 @@ async def predict_batch_csv(
         # already ran vectorized above -- calling process_record per row
         # would re-predict/re-explain one row at a time and silently lose
         # that vectorization.
-        responses.append(
-            finish_record(
-                served_ensemble,
-                result,
-                row_to_json_safe_dict(df.iloc[row_idx]),
-                explanation,
-                config=config,
-                db_engine=db_engine,
-            )
+        row_response = finish_record(
+            served_ensemble,
+            result,
+            row_to_json_safe_dict(df.iloc[row_idx]),
+            explanation,
+            config=config,
+            db_engine=db_engine,
         )
+        if row_response.alert_id is not None:
+            metrics.alerts_raised_total.labels(source="api").inc()
+        responses.append(row_response)
 
     return BatchPredictResponse(
         summary=BatchPredictSummary(total_records=len(results), prediction_counts=prediction_counts),
@@ -233,7 +237,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if isinstance(app.state.bus, InMemoryBus):
         worker_task = asyncio.create_task(
             run_worker(
-                app.state.bus, app.state.served_ensemble, app.state.serving_config, app.state.db_engine
+                app.state.bus,
+                app.state.served_ensemble,
+                app.state.serving_config,
+                app.state.db_engine,
+                app.state.metrics,
             )
         )
     try:
