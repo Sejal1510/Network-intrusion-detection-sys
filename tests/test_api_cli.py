@@ -25,6 +25,8 @@ _NIDS_ENV_VARS = (
     "NIDS_PAIRING_RATE_LIMIT_PER_MINUTE",
     "NIDS_INFERENCE_RATE_LIMIT_PER_MINUTE",
     "NIDS_MAX_UPLOAD_SIZE_BYTES",
+    "NIDS_SESSION_TTL_SECONDS",
+    "NIDS_AUTH_RATE_LIMIT_PER_MINUTE",
 )
 
 
@@ -348,6 +350,84 @@ def test_cli_main_flag_overrides_env_for_rate_limits(trained_run_dir, monkeypatc
     cli_module.main()
 
     assert calls["app"].state.serving_config.pairing_rate_limit_per_minute == 7
+
+
+def test_cli_main_wires_session_ttl_and_auth_rate_limit_flags(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--session-ttl-seconds",
+            "3600",
+            "--auth-rate-limit",
+            "3",
+        ],
+    )
+
+    cli_module.main()
+
+    config = calls["app"].state.serving_config
+    assert config.session_ttl_seconds == 3600
+    assert config.auth_rate_limit_per_minute == 3
+
+
+def test_cli_main_defaults_session_ttl_and_auth_rate_limit(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["nids-api", "--run-id", "cli-fixture-run", "--artifact-root", str(trained_run_dir)],
+    )
+
+    cli_module.main()
+
+    config = calls["app"].state.serving_config
+    assert config.session_ttl_seconds == 28_800
+    assert config.auth_rate_limit_per_minute == 10
+
+
+def test_cli_main_reads_session_ttl_and_auth_rate_limit_from_env(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setenv("NIDS_RUN_ID", "cli-fixture-run")
+    monkeypatch.setenv("NIDS_ARTIFACT_ROOT", str(trained_run_dir))
+    monkeypatch.setenv("NIDS_SESSION_TTL_SECONDS", "3600")
+    monkeypatch.setenv("NIDS_AUTH_RATE_LIMIT_PER_MINUTE", "3")
+    monkeypatch.setattr("sys.argv", ["nids-api"])
+
+    cli_module.main()
+
+    config = calls["app"].state.serving_config
+    assert config.session_ttl_seconds == 3600
+    assert config.auth_rate_limit_per_minute == 3
+
+
+def test_cli_main_flag_overrides_env_for_session_ttl(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setenv("NIDS_SESSION_TTL_SECONDS", "3600")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--session-ttl-seconds",
+            "7200",
+        ],
+    )
+
+    cli_module.main()
+
+    assert calls["app"].state.serving_config.session_ttl_seconds == 7200
 
 
 def test_cli_main_wires_log_level_and_format(trained_run_dir, monkeypatch):

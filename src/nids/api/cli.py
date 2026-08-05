@@ -109,6 +109,20 @@ def main() -> int:
         "(env: NIDS_MAX_UPLOAD_SIZE_BYTES)",
     )
     parser.add_argument(
+        "--session-ttl-seconds",
+        type=int,
+        default=_env_int("NIDS_SESSION_TTL_SECONDS", 28_800),
+        help="how long a login session (POST /auth/login) stays valid, in seconds "
+        "(env: NIDS_SESSION_TTL_SECONDS)",
+    )
+    parser.add_argument(
+        "--auth-rate-limit",
+        type=int,
+        default=_env_int("NIDS_AUTH_RATE_LIMIT_PER_MINUTE", 10),
+        help="max POST /auth/login requests per minute per client IP "
+        "(env: NIDS_AUTH_RATE_LIMIT_PER_MINUTE)",
+    )
+    parser.add_argument(
         "--log-level",
         default=os.environ.get("NIDS_LOG_LEVEL", "INFO"),
         help="root logger level, e.g. DEBUG/INFO/WARNING (env: NIDS_LOG_LEVEL)",
@@ -142,6 +156,8 @@ def main() -> int:
         pairing_rate_limit_per_minute=args.pairing_rate_limit,
         inference_rate_limit_per_minute=args.inference_rate_limit,
         max_upload_size_bytes=args.max_upload_size,
+        session_ttl_seconds=args.session_ttl_seconds,
+        auth_rate_limit_per_minute=args.auth_rate_limit,
     )
     app = create_app(config)
 

@@ -80,6 +80,24 @@ class ServingConfig:
     # has no size/row cap at all -- 10MB is generous for an investigative
     # batch upload while still bounding worst-case memory use per request.
     max_upload_size_bytes: int = 10_000_000
+    # How long a session token issued by POST /auth/login stays valid
+    # (nids.api.user_auth, nids.api.auth) before /auth/me and every
+    # login-gated route (/history/*, /devices/*) start 401ing it, even if
+    # never explicitly logged out. 8 hours -- one working shift; long
+    # enough that a SOC analyst isn't repeatedly re-logging-in mid-shift,
+    # short enough that a stolen/forgotten token doesn't stay valid
+    # indefinitely (unlike a device credential, which has no expiry at
+    # all -- see nids.api.agent_auth -- because a paired device is meant
+    # to run unattended for weeks).
+    session_ttl_seconds: int = 28_800
+    # Requests allowed per 60-second window, per client IP, to POST
+    # /auth/login (nids.api.rate_limit, nids.api.auth) -- its own budget,
+    # not a reuse of pairing_rate_limit_per_minute: that value (20/min) is
+    # tuned so a real pairing handshake never trips it, which is far too
+    # generous for login -- a legitimate user logs in rarely, so a low
+    # limit here is a real brute-force backstop rather than just an abuse
+    # backstop.
+    auth_rate_limit_per_minute: int = 10
 
     @property
     def run_dir(self) -> Path:
