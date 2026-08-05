@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from nids.api.app import create_app
 from nids.api.config import ServingConfig
+from nids.api.user_auth import create_session, register_user
 from nids.data import loader
 from nids.data.schema import FEATURE_COLUMNS
 from nids.training.config import TrainingConfig
@@ -39,8 +40,7 @@ def client_without_db(fixture_df, tmp_path):
     return TestClient(app)
 
 
-@pytest.fixture
-def client(fixture_df, tmp_path):
+def _build_history_app(fixture_df, tmp_path):
     config = TrainingConfig(
         model_name="random_forest",
         model_params={"n_estimators": 5},
@@ -49,7 +49,7 @@ def client(fixture_df, tmp_path):
     )
     run_training(config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
 
-    app = create_app(
+    return create_app(
         ServingConfig(
             run_id="history-fixture-run",
             artifact_root=tmp_path / "runs",
@@ -57,6 +57,26 @@ def client(fixture_df, tmp_path):
             alert_threshold=0.0,  # every prediction raises an alert, for easy testing
         )
     )
+
+
+@pytest.fixture
+def client(fixture_df, tmp_path):
+    """Every /history/* route requires a logged-in session (Milestone
+    11) -- this fixture logs a test user in once and reuses that
+    Authorization header for every request, so every *existing* test in
+    this file keeps working unchanged. `unauthenticated_client` below is
+    for the tests that specifically exercise the "no session" case."""
+    app = _build_history_app(fixture_df, tmp_path)
+    test_client = TestClient(app)
+    user = register_user(app.state.db_engine, "analyst1", "hunter2", "analyst")
+    session = create_session(app.state.db_engine, user.id, ttl_seconds=3600)
+    test_client.headers.update({"Authorization": f"Bearer {session.token}"})
+    return test_client
+
+
+@pytest.fixture
+def unauthenticated_client(fixture_df, tmp_path):
+    app = _build_history_app(fixture_df, tmp_path)
     return TestClient(app)
 
 
@@ -68,6 +88,26 @@ def test_history_predictions_503s_without_database(client_without_db, valid_reco
 def test_history_alerts_503s_without_database(client_without_db):
     response = client_without_db.get("/history/alerts")
     assert response.status_code == 503
+
+
+def test_list_predictions_requires_authentication(unauthenticated_client):
+    response = unauthenticated_client.get("/history/predictions")
+    assert response.status_code == 401
+
+
+def test_list_alerts_requires_authentication(unauthenticated_client):
+    response = unauthenticated_client.get("/history/alerts")
+    assert response.status_code == 401
+
+
+def test_acknowledge_alert_requires_authentication(unauthenticated_client):
+    response = unauthenticated_client.post("/history/alerts/does-not-exist/acknowledge")
+    assert response.status_code == 401
+
+
+def test_audit_requires_authentication(unauthenticated_client):
+    response = unauthenticated_client.get("/history/audit")
+    assert response.status_code == 401
 
 
 def test_list_predictions_empty_initially(client):
@@ -185,7 +225,7 @@ def test_acknowledge_alert_404s_for_unknown_id(client):
     assert response.status_code == 404
 
 
-def test_acknowledge_alert_records_audit_event(client, valid_record):
+def test_acknowledge_alert_records_username_as_actor(client, valid_record):
     predict_body = client.post("/predict", json=valid_record).json()
     alert_id = predict_body["alert_id"]
 
@@ -194,6 +234,7 @@ def test_acknowledge_alert_records_audit_event(client, valid_record):
 
     assert body["total"] == 1
     assert body["items"][0]["target_id"] == alert_id
+    assert body["items"][0]["actor"] == "user:analyst1"
 
 
 def test_list_alerts_filters_by_acknowledged(client, valid_record):

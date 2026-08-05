@@ -9,7 +9,8 @@ pattern since Milestone 2 -- this module changes nothing about
 
 Every route here 503s if no database is configured, the same "state
 doesn't exist" pattern `api/app.py`'s `_get_served_ensemble` already uses
-for an unloaded model.
+for an unloaded model. Every route also requires a logged-in session
+(`nids.api.auth.CurrentUserDep`, Milestone 11) -- 401s without one.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.engine import Engine
 
+from nids.api.auth import CurrentUserDep
 from nids.api.schemas import (
     AlertHistoryItem,
     AlertHistoryResponse,
@@ -121,6 +123,7 @@ def _to_audit_event_item(view: AuditEventView) -> AuditEventItem:
 @router.get("/predictions", response_model=PredictionHistoryResponse)
 def list_predictions_route(
     db_engine: DbEngineDep,
+    _current_user: CurrentUserDep,
     severity: str | None = None,
     attack_category: str | None = None,
     min_risk_score: float | None = None,
@@ -148,7 +151,9 @@ def list_predictions_route(
 
 
 @router.get("/predictions/{prediction_id}", response_model=PredictionHistoryItem)
-def get_prediction_route(prediction_id: str, db_engine: DbEngineDep) -> PredictionHistoryItem:
+def get_prediction_route(
+    prediction_id: str, db_engine: DbEngineDep, _current_user: CurrentUserDep
+) -> PredictionHistoryItem:
     view = get_prediction(db_engine, prediction_id)
     if view is None:
         raise HTTPException(status_code=404, detail=f"No prediction found with id {prediction_id!r}.")
@@ -158,6 +163,7 @@ def get_prediction_route(prediction_id: str, db_engine: DbEngineDep) -> Predicti
 @router.get("/alerts", response_model=AlertHistoryResponse)
 def list_alerts_route(
     db_engine: DbEngineDep,
+    _current_user: CurrentUserDep,
     level: str | None = None,
     acknowledged: bool | None = None,
     start_date: datetime | None = None,
@@ -183,7 +189,9 @@ def list_alerts_route(
 
 
 @router.get("/alerts/{alert_id}", response_model=AlertHistoryItem)
-def get_alert_route(alert_id: str, db_engine: DbEngineDep) -> AlertHistoryItem:
+def get_alert_route(
+    alert_id: str, db_engine: DbEngineDep, _current_user: CurrentUserDep
+) -> AlertHistoryItem:
     view = get_alert(db_engine, alert_id)
     if view is None:
         raise HTTPException(status_code=404, detail=f"No alert found with id {alert_id!r}.")
@@ -191,18 +199,25 @@ def get_alert_route(alert_id: str, db_engine: DbEngineDep) -> AlertHistoryItem:
 
 
 @router.post("/alerts/{alert_id}/acknowledge", response_model=AlertHistoryItem)
-def acknowledge_alert_route(alert_id: str, request: Request, db_engine: DbEngineDep) -> AlertHistoryItem:
+def acknowledge_alert_route(
+    alert_id: str, db_engine: DbEngineDep, current_user: CurrentUserDep
+) -> AlertHistoryItem:
     view = acknowledge_alert(db_engine, alert_id)
     if view is None:
         raise HTTPException(status_code=404, detail=f"No alert found with id {alert_id!r}.")
-    client_host = request.client.host if request.client else "unknown"
-    record_audit_event(db_engine, event_type="alert_acknowledged", actor=client_host, target_id=alert_id)
+    record_audit_event(
+        db_engine,
+        event_type="alert_acknowledged",
+        actor=f"user:{current_user.username}",
+        target_id=alert_id,
+    )
     return _to_alert_item(view)
 
 
 @router.get("/audit", response_model=AuditEventResponse)
 def list_audit_events_route(
     db_engine: DbEngineDep,
+    _current_user: CurrentUserDep,
     event_type: str | None = None,
     actor: str | None = None,
     start_date: datetime | None = None,
