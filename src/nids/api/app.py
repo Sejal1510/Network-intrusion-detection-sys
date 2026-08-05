@@ -41,6 +41,7 @@ from nids.api.auth import router as auth_router
 from nids.api.broadcast import router as broadcast_router
 from nids.api.bus import InMemoryBus, create_bus
 from nids.api.config import ServingConfig
+from nids.api.devices import router as devices_router
 from nids.api.explain import Explanation, explain_batch
 from nids.api.history import router as history_router
 from nids.api.inference import predict_batch
@@ -316,4 +317,5 @@ def create_app(config: ServingConfig) -> FastAPI:
     app.include_router(ingest_router)
     app.include_router(broadcast_router)
     app.include_router(auth_router)
+    app.include_router(devices_router)
     return app
