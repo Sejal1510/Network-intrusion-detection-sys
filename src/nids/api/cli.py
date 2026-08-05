@@ -88,6 +88,27 @@ def main() -> int:
         "container restart doesn't invalidate unredeemed pairing tokens",
     )
     parser.add_argument(
+        "--pairing-rate-limit",
+        type=int,
+        default=_env_int("NIDS_PAIRING_RATE_LIMIT_PER_MINUTE", 20),
+        help="max /agent/pair + /agent/pair/exchange requests per minute per client IP "
+        "(env: NIDS_PAIRING_RATE_LIMIT_PER_MINUTE)",
+    )
+    parser.add_argument(
+        "--inference-rate-limit",
+        type=int,
+        default=_env_int("NIDS_INFERENCE_RATE_LIMIT_PER_MINUTE", 120),
+        help="max /predict + /predict/batch requests per minute per client IP "
+        "(env: NIDS_INFERENCE_RATE_LIMIT_PER_MINUTE)",
+    )
+    parser.add_argument(
+        "--max-upload-size",
+        type=int,
+        default=_env_int("NIDS_MAX_UPLOAD_SIZE_BYTES", 10_000_000),
+        help="largest /predict/batch CSV upload accepted, in bytes, before a 413 "
+        "(env: NIDS_MAX_UPLOAD_SIZE_BYTES)",
+    )
+    parser.add_argument(
         "--log-level",
         default=os.environ.get("NIDS_LOG_LEVEL", "INFO"),
         help="root logger level, e.g. DEBUG/INFO/WARNING (env: NIDS_LOG_LEVEL)",
@@ -118,6 +139,9 @@ def main() -> int:
         alert_threshold=args.alert_threshold,
         cors_origins=tuple(cors_origins),
         secret_key=args.secret_key,
+        pairing_rate_limit_per_minute=args.pairing_rate_limit,
+        inference_rate_limit_per_minute=args.inference_rate_limit,
+        max_upload_size_bytes=args.max_upload_size,
     )
     app = create_app(config)
 

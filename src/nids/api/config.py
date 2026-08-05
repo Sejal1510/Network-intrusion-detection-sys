@@ -37,10 +37,13 @@ class ServingConfig:
     # Minimum RiskScore.score (0-100) that generates an Alert (see
     # nids.api.alerts). Most predictions should not become alerts.
     alert_threshold: float = 70.0
-    # MessageBus backend for live monitoring (nids.api.bus): unset means
-    # InMemoryBus (default, zero new infrastructure -- one process, no
-    # Redis). Set to e.g. "redis://localhost:6379" for RedisBus, the
-    # opt-in scaling tier (see docs/LIVE_MONITORING.md).
+    # MessageBus backend for live monitoring (nids.api.bus) *and* the rate
+    # limiter backend (nids.api.rate_limit): unset means InMemoryBus +
+    # InMemoryRateLimiter (default, zero new infrastructure -- one
+    # process, no Redis). Set to e.g. "redis://localhost:6379" to move
+    # both onto RedisBus/RedisRateLimiter, the opt-in scaling tier (see
+    # docs/LIVE_MONITORING.md, docs/OBSERVABILITY.md) -- one connection
+    # string for both, not a second Redis config field.
     redis_url: str | None = None
     # Signs agent pairing tokens (nids.api.agent_auth). Unset means a
     # random key is generated once at startup -- fine since pairing
@@ -56,6 +59,27 @@ class ServingConfig:
     # has no origin checking of any kind. Tuple (not list) to keep this
     # dataclass hashable/immutable like every other field here.
     cors_origins: tuple[str, ...] = ()
+    # Requests allowed per 60-second window, per client IP, to POST
+    # /agent/pair and POST /agent/pair/exchange (nids.api.rate_limit,
+    # nids.api.ingest) -- see docs/OBSERVABILITY.md; these routes have no
+    # auth (a device isn't credentialed until pairing succeeds), so this
+    # is the only abuse control they get. Generous enough that a real
+    # pairing handshake (one /pair call, one /pair/exchange call) never
+    # trips it.
+    pairing_rate_limit_per_minute: int = 20
+    # Requests allowed per 60-second window, per client IP, to POST
+    # /predict and POST /predict/batch (nids.api.rate_limit, nids.api.app)
+    # -- both are public and unauthenticated, and /predict/batch also has
+    # no upload size cap of its own (see max_upload_size_bytes), making
+    # this its only throttle today. Higher than
+    # pairing_rate_limit_per_minute since legitimate usage predicts far
+    # more often than it pairs.
+    inference_rate_limit_per_minute: int = 120
+    # Largest CSV nids.api.app's /predict/batch will read into memory,
+    # in bytes, before rejecting the upload with 413. The route otherwise
+    # has no size/row cap at all -- 10MB is generous for an investigative
+    # batch upload while still bounding worst-case memory use per request.
+    max_upload_size_bytes: int = 10_000_000
 
     @property
     def run_dir(self) -> Path:

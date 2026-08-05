@@ -22,6 +22,9 @@ _NIDS_ENV_VARS = (
     "NIDS_SECRET_KEY",
     "NIDS_LOG_LEVEL",
     "NIDS_LOG_FORMAT",
+    "NIDS_PAIRING_RATE_LIMIT_PER_MINUTE",
+    "NIDS_INFERENCE_RATE_LIMIT_PER_MINUTE",
+    "NIDS_MAX_UPLOAD_SIZE_BYTES",
 )
 
 
@@ -261,6 +264,90 @@ def test_cli_main_wires_env_var_database_and_cors_and_threshold(trained_run_dir,
     assert calls["app"].state.db_engine is not None
     assert config.cors_origins == ("http://localhost:5173", "http://localhost:4173")
     assert config.alert_threshold == 42.0
+
+
+def test_cli_main_wires_rate_limit_and_upload_size_flags(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--pairing-rate-limit",
+            "5",
+            "--inference-rate-limit",
+            "50",
+            "--max-upload-size",
+            "1000",
+        ],
+    )
+
+    cli_module.main()
+
+    config = calls["app"].state.serving_config
+    assert config.pairing_rate_limit_per_minute == 5
+    assert config.inference_rate_limit_per_minute == 50
+    assert config.max_upload_size_bytes == 1000
+
+
+def test_cli_main_defaults_rate_limits_and_upload_size(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["nids-api", "--run-id", "cli-fixture-run", "--artifact-root", str(trained_run_dir)],
+    )
+
+    cli_module.main()
+
+    config = calls["app"].state.serving_config
+    assert config.pairing_rate_limit_per_minute == 20
+    assert config.inference_rate_limit_per_minute == 120
+    assert config.max_upload_size_bytes == 10_000_000
+
+
+def test_cli_main_reads_rate_limits_and_upload_size_from_env(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setenv("NIDS_RUN_ID", "cli-fixture-run")
+    monkeypatch.setenv("NIDS_ARTIFACT_ROOT", str(trained_run_dir))
+    monkeypatch.setenv("NIDS_PAIRING_RATE_LIMIT_PER_MINUTE", "5")
+    monkeypatch.setenv("NIDS_INFERENCE_RATE_LIMIT_PER_MINUTE", "50")
+    monkeypatch.setenv("NIDS_MAX_UPLOAD_SIZE_BYTES", "1000")
+    monkeypatch.setattr("sys.argv", ["nids-api"])
+
+    cli_module.main()
+
+    config = calls["app"].state.serving_config
+    assert config.pairing_rate_limit_per_minute == 5
+    assert config.inference_rate_limit_per_minute == 50
+    assert config.max_upload_size_bytes == 1000
+
+
+def test_cli_main_flag_overrides_env_for_rate_limits(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: calls.update(app=app))
+    monkeypatch.setenv("NIDS_PAIRING_RATE_LIMIT_PER_MINUTE", "5")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--pairing-rate-limit",
+            "7",
+        ],
+    )
+
+    cli_module.main()
+
+    assert calls["app"].state.serving_config.pairing_rate_limit_per_minute == 7
 
 
 def test_cli_main_wires_log_level_and_format(trained_run_dir, monkeypatch):
