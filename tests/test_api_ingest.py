@@ -87,6 +87,33 @@ def test_pair_exchange_rejects_invalid_token(app_with_db):
     assert response.status_code == 400
 
 
+def test_pair_exchange_success_records_device_paired_audit_event(app_with_db):
+    from nids.api import store
+
+    client = TestClient(app_with_db)
+    token = client.post("/agent/pair").json()["pairing_token"]
+    device_id = client.post(
+        "/agent/pair/exchange", json={"pairing_token": token, "device_name": "ayush-laptop"}
+    ).json()["device_id"]
+
+    page = store.list_audit_events(app_with_db.state.db_engine, event_type="device_paired")
+
+    assert page.total == 1
+    assert page.items[0].target_id == device_id
+
+
+def test_pair_exchange_failure_records_device_pair_failed_audit_event(app_with_db):
+    from nids.api import store
+
+    client = TestClient(app_with_db)
+    client.post("/agent/pair/exchange", json={"pairing_token": "garbage", "device_name": "x"})
+
+    page = store.list_audit_events(app_with_db.state.db_engine, event_type="device_pair_failed")
+
+    assert page.total == 1
+    assert page.items[0].detail
+
+
 def test_pair_exchange_503s_without_database(app_without_db):
     client = TestClient(app_without_db)
     token = client.post("/agent/pair").json()["pairing_token"]

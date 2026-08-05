@@ -23,6 +23,7 @@ from nids.api.agent_auth import (
     issue_pairing_token,
 )
 from nids.api.schemas import DeviceCredentialResponse, PairingExchangeRequest, PairingTokenResponse
+from nids.api.store import record_audit_event
 from nids.features.contracts import validate_raw_records
 
 router = APIRouter(prefix="/agent")
@@ -50,12 +51,19 @@ def pair_exchange(payload: PairingExchangeRequest, request: Request) -> DeviceCr
     """Redeem a pairing token for a long-lived device credential. Needs a
     database (the credential is persisted)."""
     db_engine = _get_db_engine(request)
+    client_host = request.client.host if request.client else "unknown"
     try:
         credential = exchange_pairing_token(
             db_engine, payload.pairing_token, request.app.state.secret_key, payload.device_name
         )
     except ValueError as exc:
+        record_audit_event(
+            db_engine, event_type="device_pair_failed", actor=client_host, detail=str(exc)
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        db_engine, event_type="device_paired", actor=client_host, target_id=credential.device_id
+    )
     return DeviceCredentialResponse(device_id=credential.device_id, token=credential.token)
 
 

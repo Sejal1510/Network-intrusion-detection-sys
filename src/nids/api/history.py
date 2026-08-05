@@ -38,6 +38,7 @@ from nids.api.store import (
     list_alerts,
     list_audit_events,
     list_predictions,
+    record_audit_event,
 )
 
 router = APIRouter(prefix="/history")
@@ -190,10 +191,12 @@ def get_alert_route(alert_id: str, db_engine: DbEngineDep) -> AlertHistoryItem:
 
 
 @router.post("/alerts/{alert_id}/acknowledge", response_model=AlertHistoryItem)
-def acknowledge_alert_route(alert_id: str, db_engine: DbEngineDep) -> AlertHistoryItem:
+def acknowledge_alert_route(alert_id: str, request: Request, db_engine: DbEngineDep) -> AlertHistoryItem:
     view = acknowledge_alert(db_engine, alert_id)
     if view is None:
         raise HTTPException(status_code=404, detail=f"No alert found with id {alert_id!r}.")
+    client_host = request.client.host if request.client else "unknown"
+    record_audit_event(db_engine, event_type="alert_acknowledged", actor=client_host, target_id=alert_id)
     return _to_alert_item(view)
 
 

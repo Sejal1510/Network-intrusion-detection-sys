@@ -185,6 +185,17 @@ def test_acknowledge_alert_404s_for_unknown_id(client):
     assert response.status_code == 404
 
 
+def test_acknowledge_alert_records_audit_event(client, valid_record):
+    predict_body = client.post("/predict", json=valid_record).json()
+    alert_id = predict_body["alert_id"]
+
+    client.post(f"/history/alerts/{alert_id}/acknowledge")
+    body = client.get("/history/audit?event_type=alert_acknowledged").json()
+
+    assert body["total"] == 1
+    assert body["items"][0]["target_id"] == alert_id
+
+
 def test_list_alerts_filters_by_acknowledged(client, valid_record):
     predict_body = client.post("/predict", json=valid_record).json()
     client.post(f"/history/alerts/{predict_body['alert_id']}/acknowledge")
