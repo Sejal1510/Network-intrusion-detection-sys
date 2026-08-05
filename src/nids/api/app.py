@@ -37,6 +37,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pandas.errors import EmptyDataError, ParserError
 
+from nids.api.auth import router as auth_router
 from nids.api.broadcast import router as broadcast_router
 from nids.api.bus import InMemoryBus, create_bus
 from nids.api.config import ServingConfig
@@ -314,4 +315,5 @@ def create_app(config: ServingConfig) -> FastAPI:
     app.include_router(history_router)
     app.include_router(ingest_router)
     app.include_router(broadcast_router)
+    app.include_router(auth_router)
     return app

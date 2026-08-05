@@ -181,3 +181,35 @@ class PairingExchangeRequest(BaseModel):
 class DeviceCredentialResponse(BaseModel):
     device_id: str
     token: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    role: str
+
+
+class CurrentUserResponse(BaseModel):
+    username: str
+    role: str
+
+
+class DeviceListItem(BaseModel):
+    id: str
+    name: str
+    user_id: str | None
+    paired_at: datetime
+    last_seen_at: datetime | None
+    revoked: bool
+
+
+class DeviceListResponse(BaseModel):
+    items: list[DeviceListItem]
+    total: int
+    limit: int
+    offset: int
