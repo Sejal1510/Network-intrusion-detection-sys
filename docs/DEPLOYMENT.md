@@ -1,7 +1,10 @@
 # Deployment
 
-**Status: Milestone 9, Docker + Docker Compose.** Two services — `backend`
-(Dockerfile) and `frontend` (frontend/Dockerfile) — wired by
+**Status: Milestone 9, Docker + Docker Compose** (rate limiting,
+structured logging, metrics, and an audit trail added in Milestone 10 —
+see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md), also verified through a
+real `docker compose up --build` this milestone). Two services —
+`backend` (Dockerfile) and `frontend` (frontend/Dockerfile) — wired by
 `docker-compose.yml`. No Postgres or Redis: SQLite-on-a-volume and
 `InMemoryBus` are the documented defaults at this scale (docs/DATABASE.md,
 `nids.api.bus`), so compose persists what's already there rather than
@@ -86,3 +89,6 @@ locally rather than reasoning about it from the Dockerfiles alone.
   exposed directly.
 - **No multi-user auth.** Same as the rest of the platform — see
   docs/API.md's "Future endpoints" section.
+- **`/metrics` is unauthenticated**, same as `/health` — fine on a
+  private network or behind a reverse proxy, not meant to be exposed
+  publicly as-is. See [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#metrics).

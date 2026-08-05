@@ -8,8 +8,10 @@ of it is persisted and queryable via the History API. Live packet capture
 and WebSocket streaming are now done too (Milestone 6 — see
 [`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md)), and so is the web
 dashboard that actually consumes all of the above (Milestone 7 — see
-[`docs/DASHBOARD.md`](DASHBOARD.md)); notification integrations and
-threat intel feeds remain future milestones — see
+[`docs/DASHBOARD.md`](DASHBOARD.md)). Rate limiting, structured logging,
+metrics, and a security-action audit trail are done too (Milestone 10 —
+see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md)); notification
+integrations and threat intel feeds remain future milestones — see
 [Future endpoints](#future-endpoints) for how they plug into this
 architecture without restructuring it.
 
@@ -106,6 +108,14 @@ reports whether a served model is available.
 startup — a dashboard checks this once instead of discovering it by
 trial request, since `/history/*` and `/ws/live` both `503` without one
 (see [`docs/DASHBOARD.md`](DASHBOARD.md) "Degraded mode").
+
+### `GET /metrics`
+
+Prometheus text exposition format — request counts/latency, prediction
+latency, alerts raised. Unauthenticated, same as `/health`. Full metric
+list and a caveat about `nids_prediction_duration_seconds`'s two route
+labels not being apples-to-apples in
+[`docs/OBSERVABILITY.md`](OBSERVABILITY.md#metrics).
 
 ### `GET /model`
 
@@ -317,7 +327,9 @@ there's no session state that needs credentialed CORS.
 | `200` | Successful request |
 | `400` | `/predict/batch`: not a `.csv` file, unparseable CSV, or missing required columns. `ValueError` from feature validation maps here. |
 | `404` | `/history/*`: no prediction/alert with the given id |
+| `413` | `/predict/batch`: uploaded file exceeds `max_upload_size_bytes` (default 10MB) |
 | `422` | `/predict`: request body fails Pydantic validation (missing/extra/wrong-type field) — FastAPI's standard validation error shape. `/history/*`: an out-of-range `limit`/`offset` |
+| `429` | `/predict`, `/predict/batch`, `/agent/pair`, `/agent/pair/exchange`: rate limit exceeded for this client IP — see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#rate-limiting) |
 | `503` | No model is loaded (should only occur if startup loading failed). `/history/*`: no `database_url` configured for this deployment |
 
 ## Example requests
@@ -382,7 +394,8 @@ passed at startup.
 | `GET /history/predictions/{id}` | Full detail, including `explanation`/`mitre` when present. `404` if unknown |
 | `GET /history/alerts` | List, filtered by `level`, `acknowledged`, `start_date`/`end_date`; same pagination shape |
 | `GET /history/alerts/{id}` | Full detail. `404` if unknown |
-| `POST /history/alerts/{id}/acknowledge` | Flips `acknowledged` to `true`. Idempotent; `404` if unknown |
+| `POST /history/alerts/{id}/acknowledge` | Flips `acknowledged` to `true`. Idempotent; `404` if unknown. Also records an `alert_acknowledged` audit event — see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#audit-trail) |
+| `GET /history/audit` | List security-action audit events, filtered by `event_type`, `actor`, `start_date`/`end_date`; same pagination shape (Milestone 10) |
 
 List responses share one shape: `{ "items": [...], "total": <int>,
 "limit": <int>, "offset": <int> }`. **Pagination** is offset/limit —
@@ -457,6 +470,10 @@ or route, not a restructure of `nids/api`:
   (Milestone 5).** `nids/api/store.py` + `history.py`,
   `nids/api/mitre.py`, and `nids/api/alerts.py` respectively. Kept as
   worked examples of the pattern the remaining items below follow.
+- **Rate limiting / structured logging / metrics / audit trail — done
+  (Milestone 10).** `nids/api/rate_limit.py`, `nids/api/logging_config.py`,
+  `nids/api/metrics.py`, and the `audit_events` table in `nids/api/store.py`
+  respectively. Full design in [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
 - **Notification integrations (email/Slack/Teams/...).** `nids.api.alerts.
   NotificationChannel` is a documented, unimplemented `Protocol`
   (`send(alert: Alert) -> None`) — a future `nids/api/notifications/
@@ -478,7 +495,10 @@ or route, not a restructure of `nids/api`:
   abstraction (`docs/DATABASE.md`) is exactly this seam — swap SQLite for
   a shared Postgres instance, no application code change. Per-user
   auth/RBAC is a genuinely new concern, not addressed by anything built
-  so far, but doesn't conflict with it either.
+  so far, but doesn't conflict with it either — it would also replace the
+  audit trail's `actor` field (currently just a client IP; see
+  [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#audit-trail)) with a real
+  user identity, without changing that field's shape.
 - **Route growth.** `app.py` and `history.py` each build their routes on
   their own `fastapi.APIRouter`, included in `create_app` — `history.py`
   is itself the first real exercise of this pattern (previously only

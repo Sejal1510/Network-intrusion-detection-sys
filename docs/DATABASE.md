@@ -97,7 +97,7 @@ becomes a migration instead of an edit to `create_all()`'s output.
 
 ## Schema
 
-Three tables, `src/nids/api/store.py`:
+`src/nids/api/store.py`. The core prediction/alert tables:
 
 - **`predictions`** — one row per `/predict`(`/batch`) call when
   persistence is on: id, timestamp, which run(s) served it, the full
@@ -117,6 +117,17 @@ Three tables, `src/nids/api/store.py`:
   fully readable without a join), and `acknowledged` — the one real SOC
   workflow field this milestone adds (an analyst dismisses/acknowledges
   an alert via `POST /history/alerts/{id}/acknowledge`).
+- **`audit_events`** (Milestone 10) — one row per security-relevant
+  action: alert acknowledgement, successful/failed device pairing
+  exchange. `actor` is the client IP address that made the request —
+  there's no real user auth anywhere in this backend yet, so IP is the
+  only identity this system can honestly record. Deliberately does *not*
+  record rate-limit rejections (`nids.api.rate_limit`) — those go to
+  structured logs instead, so sustained abuse can't grow this table
+  unbounded. Full design in [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
+
+(A `devices` table also exists, for agent pairing credentials — see
+[`docs/LIVE_MONITORING.md`](LIVE_MONITORING.md).)
 
 Repository functions in `store.py` never return raw ORM instances — every
 read returns a plain, already-detached dataclass (`PredictionRecordView`/

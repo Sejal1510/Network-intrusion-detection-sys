@@ -13,6 +13,11 @@ services:
       NIDS_ALERT_THRESHOLD: ${NIDS_ALERT_THRESHOLD:-70}
       NIDS_CORS_ORIGINS: ${NIDS_CORS_ORIGINS:-http://localhost:8080}
       NIDS_SECRET_KEY: ${NIDS_SECRET_KEY:?set NIDS_SECRET_KEY to a random string -- see docs/DEPLOYMENT.md}
+      NIDS_LOG_LEVEL: ${NIDS_LOG_LEVEL:-INFO}
+      NIDS_LOG_FORMAT: ${NIDS_LOG_FORMAT:-json}
+      NIDS_PAIRING_RATE_LIMIT_PER_MINUTE: ${NIDS_PAIRING_RATE_LIMIT_PER_MINUTE:-20}
+      NIDS_INFERENCE_RATE_LIMIT_PER_MINUTE: ${NIDS_INFERENCE_RATE_LIMIT_PER_MINUTE:-120}
+      NIDS_MAX_UPLOAD_SIZE_BYTES: ${NIDS_MAX_UPLOAD_SIZE_BYTES:-10000000}
     volumes:
       # Trained runs are produced by `python -m nids.training` on the
       # host (see docs/DATASET.md) and never baked into the image --

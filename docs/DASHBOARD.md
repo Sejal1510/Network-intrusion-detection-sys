@@ -122,11 +122,15 @@ separate `python -m nids.agent` process):
   philosophy (exponential backoff + jitter) in the frontend's own
   language.
 - **Eager pairing on app mount, rejected.** `POST /agent/pair` /
-  `/agent/pair/exchange` have no rate limit or auth (see "Auth model"
-  above); pairing on every mount would create a `devices` row for every
-  browser tab that ever opens the app, including ones that only ever use
-  Manual Predict. Lazy pairing — only when a data page is actually
-  visited — is the smaller footprint for the same capability.
+  `/agent/pair/exchange` are now rate-limited per client IP (Milestone 10
+  — see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#rate-limiting)) but
+  still have no auth by design (see "Auth model" above) — a device has
+  nothing to authenticate with before pairing succeeds. Pairing on every
+  mount would still create a `devices` row for every browser tab that
+  ever opens the app, including ones that only ever use Manual Predict,
+  and would burn through the rate limit faster than necessary. Lazy
+  pairing — only when a data page is actually visited — is the smaller
+  footprint for the same capability.
 - **Client-side CSV zip over a new backend field.** See the CSV Upload
   design note above.
 
