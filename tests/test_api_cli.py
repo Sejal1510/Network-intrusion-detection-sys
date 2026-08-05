@@ -20,6 +20,8 @@ _NIDS_ENV_VARS = (
     "NIDS_ALERT_THRESHOLD",
     "NIDS_CORS_ORIGINS",
     "NIDS_SECRET_KEY",
+    "NIDS_LOG_LEVEL",
+    "NIDS_LOG_FORMAT",
 )
 
 
@@ -259,6 +261,90 @@ def test_cli_main_wires_env_var_database_and_cors_and_threshold(trained_run_dir,
     assert calls["app"].state.db_engine is not None
     assert config.cors_origins == ("http://localhost:5173", "http://localhost:4173")
     assert config.alert_threshold == 42.0
+
+
+def test_cli_main_wires_log_level_and_format(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: None)
+    monkeypatch.setattr(
+        cli_module, "setup_logging", lambda level, json_format: calls.update(level=level, json_format=json_format)
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--log-level",
+            "DEBUG",
+            "--log-format",
+            "json",
+        ],
+    )
+
+    cli_module.main()
+
+    assert calls == {"level": "DEBUG", "json_format": True}
+
+
+def test_cli_main_defaults_to_info_and_text_log_format(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: None)
+    monkeypatch.setattr(
+        cli_module, "setup_logging", lambda level, json_format: calls.update(level=level, json_format=json_format)
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["nids-api", "--run-id", "cli-fixture-run", "--artifact-root", str(trained_run_dir)],
+    )
+
+    cli_module.main()
+
+    assert calls == {"level": "INFO", "json_format": False}
+
+
+def test_cli_main_reads_log_level_and_format_from_env(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: None)
+    monkeypatch.setattr(
+        cli_module, "setup_logging", lambda level, json_format: calls.update(level=level, json_format=json_format)
+    )
+    monkeypatch.setenv("NIDS_RUN_ID", "cli-fixture-run")
+    monkeypatch.setenv("NIDS_ARTIFACT_ROOT", str(trained_run_dir))
+    monkeypatch.setenv("NIDS_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("NIDS_LOG_FORMAT", "json")
+    monkeypatch.setattr("sys.argv", ["nids-api"])
+
+    cli_module.main()
+
+    assert calls == {"level": "WARNING", "json_format": True}
+
+
+def test_cli_main_flag_overrides_env_for_log_level(trained_run_dir, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(cli_module.uvicorn, "run", lambda app, host, port: None)
+    monkeypatch.setattr(
+        cli_module, "setup_logging", lambda level, json_format: calls.update(level=level, json_format=json_format)
+    )
+    monkeypatch.setenv("NIDS_LOG_LEVEL", "WARNING")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "nids-api",
+            "--run-id",
+            "cli-fixture-run",
+            "--artifact-root",
+            str(trained_run_dir),
+            "--log-level",
+            "ERROR",
+        ],
+    )
+
+    cli_module.main()
+
+    assert calls["level"] == "ERROR"
 
 
 def test_cli_main_requires_run_id_from_flag_or_env(trained_run_dir, monkeypatch, capsys):

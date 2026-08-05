@@ -21,6 +21,7 @@ import uvicorn
 
 from nids.api.app import create_app
 from nids.api.config import DEFAULT_ARTIFACT_ROOT, ServingConfig
+from nids.api.logging_config import setup_logging
 
 
 def _env_float(name: str, default: float) -> float:
@@ -86,10 +87,24 @@ def main() -> int:
         "key generated at startup -- set explicitly (env: NIDS_SECRET_KEY) so a "
         "container restart doesn't invalidate unredeemed pairing tokens",
     )
+    parser.add_argument(
+        "--log-level",
+        default=os.environ.get("NIDS_LOG_LEVEL", "INFO"),
+        help="root logger level, e.g. DEBUG/INFO/WARNING (env: NIDS_LOG_LEVEL)",
+    )
+    parser.add_argument(
+        "--log-format",
+        choices=["text", "json"],
+        default=os.environ.get("NIDS_LOG_FORMAT", "text"),
+        help="'text' (human-readable, default) or 'json' (one object per line, for "
+        "log aggregators) (env: NIDS_LOG_FORMAT)",
+    )
     args = parser.parse_args()
 
     if not args.run_id:
         parser.error("--run-id is required (or set the NIDS_RUN_ID environment variable)")
+
+    setup_logging(args.log_level, json_format=(args.log_format == "json"))
 
     cors_origins = args.cors_origins or _split_origins(os.environ.get("NIDS_CORS_ORIGINS", ""))
 

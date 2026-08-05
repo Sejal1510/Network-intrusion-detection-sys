@@ -33,6 +33,7 @@ from nids.api.explain import Explanation, explain_batch
 from nids.api.history import router as history_router
 from nids.api.inference import predict_batch
 from nids.api.ingest import router as ingest_router
+from nids.api.logging_config import RequestLoggingMiddleware
 from nids.api.mitre import list_all_mappings
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.pipeline import finish_record, process_record, row_to_json_safe_dict
@@ -234,6 +235,7 @@ def create_app(config: ServingConfig) -> FastAPI:
     generated once at startup if not set explicitly.
     """
     app = FastAPI(title="NIDS Inference API", lifespan=_lifespan)
+    app.add_middleware(RequestLoggingMiddleware)
     if config.cors_origins:
         # allow_credentials stays off: the dashboard authenticates via a
         # ?token= query param (see nids.api.broadcast), never cookies, so
