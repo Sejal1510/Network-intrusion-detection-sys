@@ -13,8 +13,11 @@ not a browser, so it isn't subject to the header restriction that makes
 
 from __future__ import annotations
 
+import logging
+from typing import Annotated
+
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from nids.api.agent_auth import (
     DEFAULT_PAIRING_TTL_SECONDS,
@@ -22,9 +25,12 @@ from nids.api.agent_auth import (
     exchange_pairing_token,
     issue_pairing_token,
 )
+from nids.api.config import ServingConfig
 from nids.api.schemas import DeviceCredentialResponse, PairingExchangeRequest, PairingTokenResponse
 from nids.api.store import record_audit_event
 from nids.features.contracts import validate_raw_records
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent")
 
@@ -38,8 +44,21 @@ def _get_db_engine(request: Request):
     return db_engine
 
 
+async def _enforce_pairing_rate_limit(request: Request) -> None:
+    config: ServingConfig = request.app.state.serving_config
+    limiter = request.app.state.rate_limiter
+    client_host = request.client.host if request.client else "unknown"
+    key = f"pairing:{client_host}"
+    if not await limiter.allow(key, limit=config.pairing_rate_limit_per_minute, window_seconds=60):
+        logger.warning("Rate limit exceeded: scope=pairing client=%s", client_host)
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+
+
+PairingRateLimitDep = Annotated[None, Depends(_enforce_pairing_rate_limit)]
+
+
 @router.post("/pair", response_model=PairingTokenResponse)
-def pair(request: Request) -> PairingTokenResponse:
+def pair(request: Request, _rate_limit: PairingRateLimitDep) -> PairingTokenResponse:
     """Issue a short-lived pairing token. Stateless -- works even without
     a database configured (see `nids.api.agent_auth`)."""
     token = issue_pairing_token(request.app.state.secret_key)
@@ -47,7 +66,9 @@ def pair(request: Request) -> PairingTokenResponse:
 
 
 @router.post("/pair/exchange", response_model=DeviceCredentialResponse)
-def pair_exchange(payload: PairingExchangeRequest, request: Request) -> DeviceCredentialResponse:
+def pair_exchange(
+    payload: PairingExchangeRequest, request: Request, _rate_limit: PairingRateLimitDep
+) -> DeviceCredentialResponse:
     """Redeem a pairing token for a long-lived device credential. Needs a
     database (the credential is persisted)."""
     db_engine = _get_db_engine(request)

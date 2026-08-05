@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import logging
 import secrets
 from collections.abc import AsyncIterator
 from typing import Annotated
@@ -48,6 +49,7 @@ from nids.api.metrics import Metrics, PrometheusMiddleware, create_metrics, metr
 from nids.api.mitre import list_all_mappings
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.pipeline import finish_record, process_record, row_to_json_safe_dict
+from nids.api.rate_limit import create_rate_limiter
 from nids.api.schemas import (
     BatchPredictResponse,
     BatchPredictSummary,
@@ -62,6 +64,8 @@ from nids.api.schemas import (
 from nids.api.store import create_db_engine
 from nids.api.worker import run_worker
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -73,6 +77,19 @@ def _get_served_ensemble(request: Request) -> ServedEnsemble:
 
 
 ServedEnsembleDep = Annotated[ServedEnsemble, Depends(_get_served_ensemble)]
+
+
+async def _enforce_inference_rate_limit(request: Request) -> None:
+    config: ServingConfig = request.app.state.serving_config
+    limiter = request.app.state.rate_limiter
+    client_host = request.client.host if request.client else "unknown"
+    key = f"inference:{client_host}"
+    if not await limiter.allow(key, limit=config.inference_rate_limit_per_minute, window_seconds=60):
+        logger.warning("Rate limit exceeded: scope=inference client=%s", client_host)
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+
+
+InferenceRateLimitDep = Annotated[None, Depends(_enforce_inference_rate_limit)]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -141,6 +158,7 @@ def predict(
     payload: PredictRequest,
     request: Request,
     served_ensemble: ServedEnsembleDep,
+    _rate_limit: InferenceRateLimitDep,
     explain: bool = _EXPLAIN_QUERY,
 ) -> PredictResponse:
     record = payload.model_dump()
@@ -167,12 +185,20 @@ async def predict_batch_csv(
     request: Request,
     served_ensemble: ServedEnsembleDep,
     file: Annotated[UploadFile, File(...)],
+    _rate_limit: InferenceRateLimitDep,
     explain: bool = _EXPLAIN_QUERY,
 ) -> BatchPredictResponse:
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a .csv file.")
 
+    config: ServingConfig = request.app.state.serving_config
+    content_length = request.headers.get("content-length")
+    if content_length is not None and int(content_length) > config.max_upload_size_bytes:
+        raise HTTPException(status_code=413, detail="Uploaded file exceeds the maximum allowed size.")
+
     raw_bytes = await file.read()
+    if len(raw_bytes) > config.max_upload_size_bytes:
+        raise HTTPException(status_code=413, detail="Uploaded file exceeds the maximum allowed size.")
     try:
         df = pd.read_csv(io.BytesIO(raw_bytes))
     except (ParserError, EmptyDataError, UnicodeDecodeError, ValueError) as exc:
@@ -192,7 +218,6 @@ async def predict_batch_csv(
     else:
         explanations = [None] * len(results)
 
-    config: ServingConfig = request.app.state.serving_config
     db_engine = request.app.state.db_engine
 
     prediction_counts: dict[str, int] = {}
@@ -283,6 +308,7 @@ def create_app(config: ServingConfig) -> FastAPI:
     app.state.metrics = create_metrics()
     app.state.db_engine = create_db_engine(config.database_url) if config.database_url else None
     app.state.bus = create_bus(config.redis_url)
+    app.state.rate_limiter = create_rate_limiter(config.redis_url)
     app.state.secret_key = config.secret_key or secrets.token_urlsafe(32)
     app.include_router(router)
     app.include_router(history_router)

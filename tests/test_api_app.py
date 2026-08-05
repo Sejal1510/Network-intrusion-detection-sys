@@ -467,3 +467,74 @@ def test_predict_batch_increments_alerts_raised_total_per_alerting_row(persisted
     client.post("/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")})
 
     assert app.state.metrics.alerts_raised_total.labels(source="api")._value.get() == len(fixture_df)
+
+
+def test_predict_returns_429_after_exceeding_inference_rate_limit(persisted_client, valid_record):
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        inference_rate_limit_per_minute=1,
+    )
+
+    first = client.post("/predict", json=valid_record)
+    second = client.post("/predict", json=valid_record)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_predict_batch_returns_429_after_exceeding_inference_rate_limit(persisted_client, fixture_df):
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        inference_rate_limit_per_minute=1,
+    )
+    csv_bytes = fixture_df.to_csv(index=False).encode("utf-8")
+
+    first = client.post(
+        "/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")}
+    )
+    second = client.post(
+        "/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")}
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_predict_rate_limit_rejection_is_not_persisted_as_audit_event(persisted_client, valid_record):
+    from nids.api import store
+
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        inference_rate_limit_per_minute=1,
+    )
+
+    client.post("/predict", json=valid_record)
+    client.post("/predict", json=valid_record)  # rejected with 429
+
+    assert store.list_audit_events(app.state.db_engine).total == 0
+
+
+def test_predict_batch_returns_413_when_upload_exceeds_max_size(persisted_client, fixture_df):
+    client, app = persisted_client
+    app.state.serving_config = ServingConfig(
+        run_id=app.state.serving_config.run_id,
+        artifact_root=app.state.serving_config.artifact_root,
+        database_url=app.state.serving_config.database_url,
+        max_upload_size_bytes=10,
+    )
+    csv_bytes = fixture_df.to_csv(index=False).encode("utf-8")
+
+    response = client.post(
+        "/predict/batch", files={"file": ("sample.csv", io.BytesIO(csv_bytes), "text/csv")}
+    )
+
+    assert response.status_code == 413
