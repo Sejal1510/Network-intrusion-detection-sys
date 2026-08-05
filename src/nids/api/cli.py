@@ -46,7 +46,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--anomaly-run-id",
-        default=os.environ.get("NIDS_ANOMALY_RUN_ID"),
+        default=os.environ.get("NIDS_ANOMALY_RUN_ID") or None,
         help="optional run_id of an anomaly detector (e.g. isolation_forest) to serve "
         "alongside --run-id for hybrid detection (env: NIDS_ANOMALY_RUN_ID)",
     )
