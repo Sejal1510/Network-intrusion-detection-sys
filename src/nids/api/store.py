@@ -147,6 +147,47 @@ class AuditEventRecord(Base):
     detail: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
+class UserRecord(Base):
+    """A login identity for the dashboard (see `nids.api.user_auth`).
+    Only `password_hash` is ever stored -- never the raw password, same
+    guarantee `DeviceRecord.credential_hash` already gives device
+    credentials. `role` is a plain string (`"analyst"`/`"admin"`), not a
+    normalized lookup table -- matching this codebase's existing
+    preference for simple string enums (`severity`, `level`, `source`)
+    over a third table for two fixed values."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    username: Mapped[str] = mapped_column(String, unique=True)
+    password_hash: Mapped[str] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class SessionRecord(Base):
+    """A logged-in session token (see `nids.api.user_auth`) -- mirrors
+    `DeviceRecord`'s `credential_hash`-only-ever-stored convention
+    exactly. Uses a `revoked` flag rather than deleting the row on
+    logout, matching `DeviceRecord.revoked`'s style: `authenticate_session`
+    gets the identical hash-lookup-plus-flag-check shape
+    `authenticate_device` already has, instead of a second "gone" concept
+    (row absence) alongside it."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    token_hash: Mapped[str] = mapped_column(String, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(default=False)
+
+
 # ---------------------------------------------------------------------------
 # Read models -- plain dataclasses, safe to use after the session that
 # produced them has closed.
@@ -217,6 +258,29 @@ class AuditEventView:
     actor: str
     target_id: str | None
     detail: str | None
+
+
+@dataclass(frozen=True)
+class UserRecordView:
+    """Deliberately excludes `password_hash` -- a read model safe to hand
+    to any route/response by construction, never by remembering to strip
+    it. `nids.api.user_auth` reaches the hash only through the private
+    `_get_user_credentials_by_username` escape hatch below, for the one
+    moment it's needed to verify a login attempt."""
+
+    id: str
+    username: str
+    role: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class SessionRecordView:
+    id: str
+    user_id: str
+    created_at: datetime
+    expires_at: datetime
+    revoked: bool
 
 
 @dataclass(frozen=True)
@@ -296,6 +360,22 @@ def _audit_event_to_view(record: AuditEventRecord) -> AuditEventView:
         actor=record.actor,
         target_id=record.target_id,
         detail=record.detail,
+    )
+
+
+def _user_to_view(record: UserRecord) -> UserRecordView:
+    return UserRecordView(
+        id=record.id, username=record.username, role=record.role, created_at=record.created_at
+    )
+
+
+def _session_to_view(record: SessionRecord) -> SessionRecordView:
+    return SessionRecordView(
+        id=record.id,
+        user_id=record.user_id,
+        created_at=record.created_at,
+        expires_at=record.expires_at,
+        revoked=record.revoked,
     )
 
 
@@ -535,6 +615,16 @@ def revoke_device(engine: Engine, device_id: str) -> DeviceRecordView | None:
         return _device_to_view(record)
 
 
+def list_devices(engine: Engine, limit: int = 20, offset: int = 0) -> Page:
+    with Session(engine) as session:
+        stmt = select(DeviceRecord)
+        total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = session.scalars(
+            stmt.order_by(DeviceRecord.paired_at.desc()).limit(limit).offset(offset)
+        ).all()
+        return Page(items=[_device_to_view(r) for r in rows], total=total, limit=limit, offset=offset)
+
+
 # ---------------------------------------------------------------------------
 # Audit trail (see AuditEventRecord above)
 # ---------------------------------------------------------------------------
@@ -579,3 +669,90 @@ def list_audit_events(
             stmt.order_by(AuditEventRecord.created_at.desc()).limit(limit).offset(offset)
         ).all()
         return Page(items=[_audit_event_to_view(r) for r in rows], total=total, limit=limit, offset=offset)
+
+
+# ---------------------------------------------------------------------------
+# Users & sessions (see nids.api.user_auth)
+# ---------------------------------------------------------------------------
+
+
+def create_user(engine: Engine, username: str, password_hash: str, role: str) -> UserRecordView:
+    record = UserRecord(username=username, password_hash=password_hash, role=role)
+    with Session(engine) as session:
+        session.add(record)
+        session.commit()
+        return _user_to_view(record)
+
+
+def get_user_by_username(engine: Engine, username: str) -> UserRecordView | None:
+    with Session(engine) as session:
+        record = session.scalars(
+            select(UserRecord).where(UserRecord.username == username)
+        ).one_or_none()
+        return _user_to_view(record) if record is not None else None
+
+
+def get_user_by_id(engine: Engine, user_id: str) -> UserRecordView | None:
+    with Session(engine) as session:
+        record = session.get(UserRecord, user_id)
+        return _user_to_view(record) if record is not None else None
+
+
+def list_users(engine: Engine, limit: int = 20, offset: int = 0) -> Page:
+    with Session(engine) as session:
+        stmt = select(UserRecord)
+        total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = session.scalars(
+            stmt.order_by(UserRecord.created_at.desc()).limit(limit).offset(offset)
+        ).all()
+        return Page(items=[_user_to_view(r) for r in rows], total=total, limit=limit, offset=offset)
+
+
+def set_user_role(engine: Engine, user_id: str, role: str) -> UserRecordView | None:
+    with Session(engine) as session:
+        record = session.get(UserRecord, user_id)
+        if record is None:
+            return None
+        record.role = role
+        session.commit()
+        return _user_to_view(record)
+
+
+def _get_user_credentials_by_username(engine: Engine, username: str) -> tuple[str, UserRecordView] | None:
+    """The one place `password_hash` briefly exists outside `UserRecord`
+    itself -- used only by `nids.api.user_auth.authenticate_user` to
+    verify a login attempt, immediately discarded after. Every other
+    caller gets `UserRecordView`, which has no hash field at all."""
+    with Session(engine) as session:
+        record = session.scalars(
+            select(UserRecord).where(UserRecord.username == username)
+        ).one_or_none()
+        if record is None:
+            return None
+        return record.password_hash, _user_to_view(record)
+
+
+def create_session(engine: Engine, user_id: str, token_hash: str, expires_at: datetime) -> SessionRecordView:
+    record = SessionRecord(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
+    with Session(engine) as session:
+        session.add(record)
+        session.commit()
+        return _session_to_view(record)
+
+
+def get_session_by_token_hash(engine: Engine, token_hash: str) -> SessionRecordView | None:
+    with Session(engine) as session:
+        record = session.scalars(
+            select(SessionRecord).where(SessionRecord.token_hash == token_hash)
+        ).one_or_none()
+        return _session_to_view(record) if record is not None else None
+
+
+def revoke_session_by_token_hash(engine: Engine, token_hash: str) -> None:
+    with Session(engine) as session:
+        record = session.scalars(
+            select(SessionRecord).where(SessionRecord.token_hash == token_hash)
+        ).one_or_none()
+        if record is not None:
+            record.revoked = True
+            session.commit()
