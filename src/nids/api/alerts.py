@@ -63,6 +63,14 @@ def meets_min_severity(level: str, minimum: str) -> bool:
     return _SEVERITY_ORDER.index(level) >= _SEVERITY_ORDER.index(minimum)
 
 
+def severity_rank(level: str) -> int:
+    """0 (low) .. 3 (critical) -- for comparing severities, e.g. picking
+    the higher-severity `Alert` when both the ML path (`generate_alert`)
+    and a signature match (`nids.api.rules.evaluate_rules`) fire for the
+    same record (see `nids.api.pipeline.finish_record`)."""
+    return _SEVERITY_ORDER.index(level)
+
+
 def alert_to_dict(alert: Alert) -> dict[str, Any]:
     """`Alert` -> a JSON-safe dict, for publishing on
     `nids.api.bus.MessageBus`'s `"notifications"` channel (which, like

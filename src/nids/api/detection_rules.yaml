@@ -1,0 +1,87 @@
+# Signature-based detection rules (see nids/api/rules.py). Evaluated
+# purely against the raw record -- never against a classifier's
+# output -- so a rule fires independently of what (or whether) the ML
+# model predicts. All conditions in a rule are AND-combined; a record
+# must satisfy every one to match.
+#
+# Field names are nids.data.schema.FEATURE_COLUMNS values. Operators:
+# eq, gt, gte, lt, lte.
+
+rules:
+  - id: R001
+    name: "SYN flood pattern"
+    description: >-
+      High connection count to the same host with an S0 (connection
+      attempt, no reply) flag -- a classic SYN flood / port-scan
+      signature, independent of the trained classifier's own verdict.
+    severity: critical
+    conditions:
+      - field: flag
+        operator: eq
+        value: S0
+      - field: count
+        operator: gt
+        value: 100
+    mitre:
+      tactic: "Impact"
+      techniques:
+        - id: "T1498"
+          name: "Network Denial of Service"
+          url: "https://attack.mitre.org/techniques/T1498/"
+
+  - id: R002
+    name: "Root shell obtained"
+    description: >-
+      A root shell was obtained during this connection (root_shell=1) --
+      a definitive privilege-escalation signal regardless of how the
+      connection was otherwise classified.
+    severity: critical
+    conditions:
+      - field: root_shell
+        operator: eq
+        value: 1
+    mitre:
+      tactic: "Privilege Escalation"
+      techniques:
+        - id: "T1548"
+          name: "Abuse Elevation Control Mechanism"
+          url: "https://attack.mitre.org/techniques/T1548/"
+
+  - id: R003
+    name: "Guest login to an already-authenticated service"
+    description: >-
+      A guest-account login (is_guest_login=1) succeeded (logged_in=1) --
+      guest/anonymous access reaching an authenticated service is worth
+      a human's attention even when nothing else about the connection
+      looks anomalous.
+    severity: high
+    conditions:
+      - field: is_guest_login
+        operator: eq
+        value: 1
+      - field: logged_in
+        operator: eq
+        value: 1
+    mitre:
+      tactic: "Initial Access"
+      techniques:
+        - id: "T1078"
+          name: "Valid Accounts"
+          url: "https://attack.mitre.org/techniques/T1078/"
+
+  - id: R004
+    name: "Repeated failed logins"
+    description: >-
+      Three or more failed login attempts on a single connection record --
+      a brute-force signature.
+    severity: medium
+    conditions:
+      - field: num_failed_logins
+        operator: gte
+        value: 3
+    mitre:
+      tactic: "Credential Access"
+      techniques:
+        - id: "T1110"
+          name: "Brute Force"
+          url: "https://attack.mitre.org/techniques/T1110/"

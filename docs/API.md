@@ -485,20 +485,26 @@ or route, not a restructure of `nids/api`:
   mapping and alerting (e.g. IP reputation) is another pure function
   consuming `PredictionResult`/the raw record, composed the same way
   `risk.py`/`mitre.py` are today.
-- **Rule-based detections.** A future `nids/api/rules.py` producing its
-  own `Alert`s (same dataclass, `source="rule"`) alongside the ML-driven
-  path — `Alert`'s shape doesn't assume ML provenance.
+- **Rule-based detections — done (Milestone 13).** `nids/api/rules.py`
+  produces its own `Alert`s (same dataclass, `source="rule"`) alongside
+  the ML-driven path, evaluated purely against the raw record — never
+  against a `PredictionResult` — so a rule fires independently of the
+  classifier's own verdict. Both can fire for the same record;
+  `nids.api.pipeline.finish_record` persists and notifies each
+  independently. Full design in [`docs/RULES.md`](RULES.md).
 - **Explaining the anomaly detector / non-tree explainer strategies.**
   Unchanged from Milestone 4 — see `nids/api/explain.py`'s module
   docstring.
-- **Multi-user deployments / cloud deployment.** The `DATABASE_URL`
-  abstraction (`docs/DATABASE.md`) is exactly this seam — swap SQLite for
-  a shared Postgres instance, no application code change. Per-user
-  auth/RBAC is a genuinely new concern, not addressed by anything built
-  so far, but doesn't conflict with it either — it would also replace the
-  audit trail's `actor` field (currently just a client IP; see
-  [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#audit-trail)) with a real
-  user identity, without changing that field's shape.
+- **Multi-user auth/RBAC — done (Milestone 11).** Session-token login,
+  `analyst`/`admin` roles, `/auth/*` + admin-only `/devices/*`. The audit
+  trail's `actor` field (see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md
+  #audit-trail)) now records the logged-in username where a route
+  requires login, falling back to client IP only where it doesn't
+  (`/agent/pair` etc., which stay unauthenticated by design).
+- **Cloud deployment (shared Postgres, multiple replicas).** The
+  `DATABASE_URL` abstraction (`docs/DATABASE.md`) is exactly this seam —
+  swap SQLite for a shared Postgres instance, no application code
+  change. Not yet exercised beyond SQLite in practice.
 - **Route growth.** `app.py` and `history.py` each build their routes on
   their own `fastapi.APIRouter`, included in `create_app` — `history.py`
   is itself the first real exercise of this pattern (previously only

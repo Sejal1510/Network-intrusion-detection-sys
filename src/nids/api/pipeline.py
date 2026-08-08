@@ -30,13 +30,14 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.engine import Engine
 
-from nids.api.alerts import Alert, generate_alert, meets_min_severity
+from nids.api.alerts import Alert, generate_alert, meets_min_severity, severity_rank
 from nids.api.config import ServingConfig
 from nids.api.explain import Explanation, explain_one
 from nids.api.inference import PredictionResult, predict_one
 from nids.api.mitre import MitreMapping, map_to_mitre
 from nids.api.model_loader import ServedEnsemble
 from nids.api.risk import RiskScore, compute_risk_score
+from nids.api.rules import evaluate_rules, generate_rule_alert
 from nids.api.schemas import (
     ExplanationResponse,
     FeatureContributionResponse,
@@ -131,7 +132,7 @@ def persist_if_configured(
     label_column: str,
     anomaly_run_id: str | None,
     explanation: Explanation | None,
-    alert: Alert | None,
+    alerts: list[Alert],
     source: str = "api",
     device_id: str | None = None,
 ) -> None:
@@ -139,7 +140,15 @@ def persist_if_configured(
     `database_url` was configured) -- alert *generation* already happened
     unconditionally by the time this is called; this only decides whether
     to record it. `device_id` is `None` for HTTP-originated predictions
-    and set for live-agent-originated ones (see `nids.api.worker`)."""
+    and set for live-agent-originated ones (see `nids.api.worker`).
+
+    `alerts` may hold more than one entry -- the ML classifier
+    (`generate_alert`) and a signature match (`nids.api.rules.
+    evaluate_rules`) can both fire independently for the same record.
+    `AlertRecord.prediction_id` is a one-to-many relationship (see
+    `nids.api.store.PredictionRecord.alerts`) precisely so this is safe:
+    each alert here becomes its own row against the one `prediction_id`
+    this call creates."""
     if db_engine is None:
         return
     prediction_id = save_prediction(
@@ -155,7 +164,7 @@ def persist_if_configured(
         source=source,
         device_id=device_id,
     )
-    if alert is not None:
+    for alert in alerts:
         save_alert(db_engine, prediction_id, alert, device_id=device_id)
 
 
@@ -175,21 +184,42 @@ def finish_record(
     """risk -> mitre -> alert -> optional persist -> response, given an
     already-computed prediction (and, optionally, explanation).
 
-    `notify`, if given, is called with the `Alert` when one is generated
-    *and* its severity meets `config.notification_min_severity` -- the
-    caller (`nids.api.app`/`nids.api.worker`) decides what "notify"
-    means (see `nids.api.notifications.publish.schedule_alert_publish`);
-    this module stays free of any bus/asyncio import, matching its own
-    "pure orchestration" docstring."""
+    `notify`, if given, is called once per `Alert` generated (there may
+    be zero, one, or two: the ML classifier via `generate_alert` and a
+    signature match via `nids.api.rules.evaluate_rules` fire
+    independently) whose severity meets
+    `config.notification_min_severity` -- the caller (`nids.api.app`/
+    `nids.api.worker`) decides what "notify" means (see
+    `nids.api.notifications.publish.schedule_alert_publish`); this
+    module stays free of any bus/asyncio import, matching its own "pure
+    orchestration" docstring.
+
+    Rule evaluation runs against `record` (the raw feature dict) only --
+    never against `result` -- so a rule can fire on a record the
+    classifier doesn't flag at all, and vice versa; the two paths never
+    influence each other. When both fire, `alert_id` on the returned
+    response is whichever is higher severity (`nids.api.alerts.
+    severity_rank`; a tie prefers the rule match, since it's a
+    deterministic signature hit rather than a probabilistic one) -- but
+    *both* are still persisted/notified independently; only the single
+    HTTP response field (`PredictResponse.alert_id`, unchanged shape for
+    frontend compatibility) can name just one.
+    """
     risk_score = compute_risk_score(result)
     mitre = map_to_mitre(result.attack_category)
-    alert = generate_alert(
+    ml_alert = generate_alert(
         result, risk_score, mitre, explanation, threshold=config.alert_threshold, source=source
     )
-    if alert is not None and notify is not None and meets_min_severity(
-        alert.level, config.notification_min_severity
-    ):
-        notify(alert)
+    matched_rule = evaluate_rules(record)
+    rule_alert = generate_rule_alert(matched_rule) if matched_rule is not None else None
+    # rule_alert first: on an exact severity tie, max()'s left-to-right
+    # stability (see the docstring above) picks it as the primary alert.
+    alerts = [a for a in (rule_alert, ml_alert) if a is not None]
+
+    if notify is not None:
+        for alert in alerts:
+            if meets_min_severity(alert.level, config.notification_min_severity):
+                notify(alert)
 
     if persist:
         run_id, label_column, anomaly_run_id = run_ids(served_ensemble)
@@ -203,12 +233,13 @@ def finish_record(
             label_column,
             anomaly_run_id,
             explanation,
-            alert,
+            alerts,
             source=source,
             device_id=device_id,
         )
 
-    alert_id = alert.alert_id if alert is not None else None
+    primary_alert = max(alerts, key=lambda a: severity_rank(a.level)) if alerts else None
+    alert_id = primary_alert.alert_id if primary_alert is not None else None
     return to_response(result, risk_score, mitre, alert_id, explanation)
 
 

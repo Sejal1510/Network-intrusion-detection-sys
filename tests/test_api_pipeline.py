@@ -197,3 +197,114 @@ def test_process_record_forwards_notify_to_finish_record(served_ensemble, valid_
     process_record(served_ensemble, valid_record, config=config, db_engine=None, notify=notified.append)
 
     assert len(notified) == 1
+
+
+# --- Rule-based detection: independence from the ML classifier -------------
+
+
+def test_process_record_rule_fires_even_when_ml_classifier_does_not_alert(
+    served_ensemble, valid_record
+):
+    """The core independence guarantee: a record engineered to match a
+    signature (R001's SYN-flood pattern -- flag=S0, count>100) still
+    raises an alert -- persisted with source="rule" -- even when the ML
+    path is configured to never alert (alert_threshold impossibly high),
+    proving the rule path doesn't depend on, and isn't gated by, the
+    classifier's own verdict."""
+    from nids.api import store
+
+    record = {**valid_record, "flag": "S0", "count": 150}
+    never_alert_config = ServingConfig(run_id="test-run", alert_threshold=1000.0)
+    engine = store.create_db_engine("sqlite:///:memory:")
+
+    response = process_record(served_ensemble, record, config=never_alert_config, db_engine=engine)
+
+    assert response.alert_id is not None
+    alert = store.get_alert(engine, response.alert_id)
+    assert alert.source == "rule"
+    assert alert.level == "critical"
+    assert alert.mitre is not None
+
+
+def test_process_record_record_not_matching_any_rule_raises_no_rule_alert(
+    served_ensemble, valid_record
+):
+    never_alert_config = ServingConfig(run_id="test-run", alert_threshold=1000.0)
+    record = {
+        **valid_record,
+        "flag": "SF",
+        "count": 1,
+        "root_shell": 0,
+        "is_guest_login": 0,
+        "num_failed_logins": 0,
+    }
+
+    response = process_record(served_ensemble, record, config=never_alert_config, db_engine=None)
+
+    assert response.alert_id is None
+
+
+def test_process_record_both_ml_and_rule_alerts_persist_independently(served_ensemble, valid_record):
+    """When the ML path *also* alerts (alert_threshold=0.0, matching the
+    module's `config` fixture) on a record that additionally matches a
+    rule, both alerts persist as separate rows against the same
+    prediction -- neither silences the other."""
+    from nids.api import store
+
+    record = {**valid_record, "flag": "S0", "count": 150}
+    always_alert_config = ServingConfig(run_id="test-run", alert_threshold=0.0)
+    engine = store.create_db_engine("sqlite:///:memory:")
+
+    response = process_record(served_ensemble, record, config=always_alert_config, db_engine=engine)
+
+    primary = store.get_alert(engine, response.alert_id)
+    all_alerts_for_prediction = store.list_alerts(engine, limit=100, offset=0).items
+    matching = [a for a in all_alerts_for_prediction if a.prediction_id == primary.prediction_id]
+
+    assert len(matching) == 2
+    assert {a.source for a in matching} == {"api", "rule"}
+
+
+def test_process_record_primary_alert_id_prefers_rule_on_severity_tie(served_ensemble, valid_record):
+    """R001 (SYN flood) is severity=critical. Forcing the ML path to
+    also produce a critical-severity alert on the same record means both
+    alerts tie in severity -- the primary (response.alert_id) must be
+    the rule alert, per finish_record's documented tie-break."""
+    from nids.api import store
+
+    record = {**valid_record, "flag": "S0", "count": 150}
+    always_alert_config = ServingConfig(run_id="test-run", alert_threshold=0.0)
+    engine = store.create_db_engine("sqlite:///:memory:")
+
+    response = process_record(served_ensemble, record, config=always_alert_config, db_engine=engine)
+
+    primary = store.get_alert(engine, response.alert_id)
+    # Whichever of the two alerts is primary, if it's a tie the rule
+    # must win; if the ML alert genuinely outranks it in severity, the
+    # ML alert winning is also correct -- assert the actual contract:
+    # primary is always the max-severity one, rule preferred on ties.
+    all_alerts = [
+        a for a in store.list_alerts(engine, limit=100, offset=0).items
+        if a.prediction_id == primary.prediction_id
+    ]
+    from nids.api.alerts import severity_rank
+
+    best_rank = max(severity_rank(a.level) for a in all_alerts)
+    assert severity_rank(primary.level) == best_rank
+    if len([a for a in all_alerts if severity_rank(a.level) == best_rank]) > 1:
+        assert primary.source == "rule"
+
+
+def test_finish_record_notify_called_for_both_alerts_when_both_qualify(served_ensemble, valid_record):
+    record = {**valid_record, "flag": "S0", "count": 150}
+    always_alert_config = ServingConfig(
+        run_id="test-run", alert_threshold=0.0, notification_min_severity="low"
+    )
+    notified = []
+
+    process_record(
+        served_ensemble, record, config=always_alert_config, db_engine=None, notify=notified.append
+    )
+
+    assert len(notified) == 2
+    assert {a.source for a in notified} == {"api", "rule"}

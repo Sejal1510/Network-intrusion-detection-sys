@@ -25,6 +25,7 @@ dependencies = [
     "websockets>=13.0",
     "prometheus-client>=0.20",
     "bcrypt>=4.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +41,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-"nids.api" = ["*.json"]
+"nids.api" = ["*.json", "*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
