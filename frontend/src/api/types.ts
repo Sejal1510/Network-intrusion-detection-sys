@@ -142,6 +142,40 @@ export interface DeviceCredentialResponse {
   token: string
 }
 
+export type UserRole = "analyst" | "admin"
+
+export interface LoginRequest {
+  username: string
+  password: string
+}
+
+export interface LoginResponse {
+  token: string
+  username: string
+  role: UserRole
+}
+
+export interface CurrentUserResponse {
+  username: string
+  role: UserRole
+}
+
+export interface DeviceListItem {
+  id: string
+  name: string
+  user_id: string | null
+  paired_at: string
+  last_seen_at: string | null
+  revoked: boolean
+}
+
+export interface DeviceListResponse {
+  items: DeviceListItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
 /** One raw connection record -- the 41 fields of nids.data.schema.FEATURE_COLUMNS. */
 export type PredictRequest = Record<string, string | number>
 

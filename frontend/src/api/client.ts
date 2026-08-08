@@ -1,5 +1,18 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"
 
+// The current login session token (nids.api.auth), if any -- set by
+// UserAuthProvider on login/logout. A module-level value, not a token
+// threaded through every endpoint function: there is exactly one such
+// value per browser tab, so this is the honest shape, not an
+// abstraction leak. Distinct from the device token (useDeviceAuth),
+// which is only ever sent as a WebSocket ?token= query param, never a
+// REST header.
+let currentSessionToken: string | null = null
+
+export function setSessionToken(token: string | null): void {
+  currentSessionToken = token
+}
+
 export class ApiError extends Error {
   status: number
 
@@ -28,6 +41,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.body && !(init.body instanceof FormData)
         ? { "Content-Type": "application/json" }
         : {}),
+      ...(currentSessionToken ? { Authorization: `Bearer ${currentSessionToken}` } : {}),
       ...init?.headers,
     },
   })

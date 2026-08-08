@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom"
+import { useUserAuthContext } from "@/context/UserAuthProvider"
 
 const LINKS = [
   { to: "/", label: "Overview", end: true },
@@ -9,9 +10,12 @@ const LINKS = [
 ]
 
 export function Sidebar() {
+  const { user } = useUserAuthContext()
+  const links = user?.role === "admin" ? [...LINKS, { to: "/devices", label: "Devices" }] : LINKS
+
   return (
     <nav className="flex w-48 shrink-0 flex-col gap-1 border-r border-[var(--border-hairline)] p-4">
-      {LINKS.map((link) => (
+      {links.map((link) => (
         <NavLink
           key={link.to}
           to={link.to}
