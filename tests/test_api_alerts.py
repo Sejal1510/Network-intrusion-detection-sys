@@ -1,4 +1,10 @@
-from nids.api.alerts import Alert, generate_alert
+from nids.api.alerts import (
+    Alert,
+    alert_from_dict,
+    alert_to_dict,
+    generate_alert,
+    meets_min_severity,
+)
 from nids.api.explain import Explanation, FeatureContribution
 from nids.api.inference import PredictionResult
 from nids.api.mitre import MitreMapping, MitreTechnique
@@ -80,3 +86,46 @@ def test_generate_alert_uses_default_threshold_when_not_specified():
 
     assert just_below is None
     assert just_above is not None
+
+
+def test_meets_min_severity_true_at_or_above():
+    assert meets_min_severity("high", "high") is True
+    assert meets_min_severity("critical", "high") is True
+
+
+def test_meets_min_severity_false_below():
+    assert meets_min_severity("medium", "high") is False
+    assert meets_min_severity("low", "critical") is False
+
+
+def test_alert_to_dict_from_dict_round_trips_without_mitre():
+    alert = generate_alert(_result(), _risk(90.0), mitre=None, threshold=70.0)
+
+    restored = alert_from_dict(alert_to_dict(alert))
+
+    assert restored == alert
+
+
+def test_alert_to_dict_from_dict_round_trips_with_mitre():
+    mapping = MitreMapping(
+        tactic="Impact",
+        techniques=[MitreTechnique(id="T1498", name="Network DoS", url="https://example.com")],
+    )
+    alert = generate_alert(_result("dos"), _risk(90.0), mitre=mapping, threshold=70.0)
+
+    restored = alert_from_dict(alert_to_dict(alert))
+
+    assert restored == alert
+    assert restored.mitre == mapping
+
+
+def test_alert_to_dict_is_json_safe():
+    import json
+
+    alert = generate_alert(_result(), _risk(90.0), mitre=None, threshold=70.0)
+
+    # Raises if anything in the dict isn't JSON-serializable (e.g. a raw
+    # datetime) -- the whole point of alert_to_dict, since it's what
+    # crosses the MessageBus (nids.api.bus, RedisBus JSON-encodes every
+    # message).
+    json.dumps(alert_to_dict(alert))

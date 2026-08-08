@@ -19,6 +19,7 @@ consumer groups.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from sqlalchemy.engine import Engine
@@ -28,6 +29,7 @@ from nids.api.config import ServingConfig
 from nids.api.inference import PredictionResult
 from nids.api.metrics import Metrics
 from nids.api.model_loader import ServedEnsemble
+from nids.api.notifications.publish import schedule_alert_publish
 from nids.api.pipeline import process_record
 from nids.api.risk import RiskScore
 
@@ -70,6 +72,7 @@ async def process_flow_message(
             ),
             source="agent",
             device_id=device_id,
+            notify=lambda alert: schedule_alert_publish(bus, asyncio.get_running_loop(), alert),
         )
     except ValueError as exc:
         logger.warning("Dropping invalid flow record from device %s: %s", device_id, exc)

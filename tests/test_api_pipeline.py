@@ -1,8 +1,10 @@
+import dataclasses
 from pathlib import Path
 
 import pytest
 
 from nids.api.config import ServingConfig
+from nids.api.inference import PredictionResult
 from nids.api.model_loader import ServedEnsemble, ServedModel
 from nids.api.pipeline import finish_record, process_record
 from nids.api.schemas import PredictResponse
@@ -12,6 +14,18 @@ from nids.training.config import TrainingConfig
 from nids.training.core import fit_and_evaluate
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_kdd.txt"
+
+
+def _result_with_severity(severity: str) -> PredictionResult:
+    return PredictionResult(
+        prediction=1,
+        probabilities={"0": 0.1, "1": 0.9},
+        confidence=0.9,
+        attack_category="dos",
+        anomaly_score=None,
+        is_anomaly=None,
+        severity=severity,
+    )
 
 
 @pytest.fixture
@@ -136,3 +150,50 @@ def test_finish_record_matches_process_record_when_given_the_same_prediction(
 
     assert via_finish.prediction == via_process.prediction
     assert via_finish.risk_score.score == via_process.risk_score.score
+
+
+def test_finish_record_calls_notify_when_alert_meets_min_severity(served_ensemble, valid_record, config):
+    notified = []
+    result = _result_with_severity("critical")
+
+    finish_record(
+        served_ensemble, result, valid_record, None, config=config, db_engine=None,
+        notify=notified.append,
+    )
+
+    assert len(notified) == 1
+    assert notified[0].level == "critical"
+
+
+def test_finish_record_skips_notify_when_below_min_severity(served_ensemble, valid_record, config):
+    strict_config = dataclasses.replace(config, notification_min_severity="critical")
+    notified = []
+    result = _result_with_severity("high")
+
+    finish_record(
+        served_ensemble, result, valid_record, None, config=strict_config, db_engine=None,
+        notify=notified.append,
+    )
+
+    assert notified == []
+
+
+def test_finish_record_skips_notify_when_no_alert_generated(served_ensemble, valid_record):
+    no_alert_config = ServingConfig(run_id="test-run", alert_threshold=1000.0)
+    notified = []
+    result = _result_with_severity("low")
+
+    finish_record(
+        served_ensemble, result, valid_record, None, config=no_alert_config, db_engine=None,
+        notify=notified.append,
+    )
+
+    assert notified == []
+
+
+def test_process_record_forwards_notify_to_finish_record(served_ensemble, valid_record, config):
+    notified = []
+
+    process_record(served_ensemble, valid_record, config=config, db_engine=None, notify=notified.append)
+
+    assert len(notified) == 1

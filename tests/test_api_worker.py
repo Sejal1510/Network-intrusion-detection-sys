@@ -105,6 +105,32 @@ async def test_process_flow_message_explains_only_when_alert_worthy(served_ensem
     assert result["explanation"] is not None  # alert-worthy -- explained
 
 
+async def test_process_flow_message_publishes_alert_worthy_result_to_notifications_channel(
+    served_ensemble, valid_record, metrics
+):
+    bus = InMemoryBus()
+    # notification_min_severity="low" so this doesn't depend on which
+    # severity the fixture model happens to assign valid_record -- only
+    # that alert_threshold=0.0 guarantees an alert is generated at all.
+    config = ServingConfig(run_id="test-run", alert_threshold=0.0, notification_min_severity="low")
+
+    async def consume_one(channel):
+        async for message in bus.subscribe(channel):
+            return message
+
+    live_task = asyncio.create_task(consume_one("live"))
+    notifications_task = asyncio.create_task(consume_one("notifications"))
+    await asyncio.sleep(0)
+
+    await process_flow_message(
+        {"device_id": "device-1", "record": valid_record}, bus, served_ensemble, config, None, metrics
+    )
+
+    live_result = await asyncio.wait_for(live_task, timeout=1)
+    notification = await asyncio.wait_for(notifications_task, timeout=1)
+    assert notification["alert_id"] == live_result["alert_id"]
+
+
 async def test_process_flow_message_increments_alerts_raised_total_when_alert_worthy(
     served_ensemble, valid_record, metrics
 ):

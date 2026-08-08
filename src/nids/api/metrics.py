@@ -41,6 +41,7 @@ class Metrics:
     http_request_duration_seconds: Histogram
     prediction_duration_seconds: Histogram
     alerts_raised_total: Counter
+    notifications_sent_total: Counter
 
 
 def create_metrics() -> Metrics:
@@ -74,6 +75,13 @@ def create_metrics() -> Metrics:
             "nids_alerts_raised_total",
             "Total alerts raised (RiskScore crossing alert_threshold).",
             ["source"],
+            registry=registry,
+        ),
+        notifications_sent_total=Counter(
+            "nids_notifications_sent_total",
+            "Total notification channel send attempts (nids.api.notifications), "
+            "labeled by channel class name and outcome.",
+            ["channel", "status"],
             registry=registry,
         ),
     )

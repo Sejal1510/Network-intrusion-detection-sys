@@ -98,6 +98,29 @@ class ServingConfig:
     # limit here is a real brute-force backstop rather than just an abuse
     # backstop.
     auth_rate_limit_per_minute: int = 10
+    # Slack "Incoming Webhook" URL (nids.api.notifications.slack) --
+    # unset means the Slack channel is never constructed, same
+    # "unset = feature off, zero behavior change" convention as
+    # database_url/redis_url above.
+    slack_webhook_url: str | None = None
+    # SMTP server for the email channel (nids.api.notifications.
+    # email_channel). All four of host/from_addr/to_addrs (non-empty)
+    # must be set for the channel to be constructed -- username/password
+    # are optional (an internal relay may allow anonymous send).
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_addr: str | None = None
+    smtp_to_addrs: tuple[str, ...] = ()
+    smtp_use_tls: bool = True
+    # Minimum Alert.level (nids.api.alerts.meets_min_severity) that
+    # actually notifies a configured channel. Deliberately separate from
+    # alert_threshold: not every alert (SOC-dashboard-worthy) should page
+    # someone (human-interruptive) -- "high" by default so a Slack/email
+    # channel isn't drowned in "low"/"medium" noise the moment it's
+    # configured.
+    notification_min_severity: str = "high"
 
     @property
     def run_dir(self) -> Path:

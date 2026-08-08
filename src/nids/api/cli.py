@@ -34,6 +34,13 @@ def _env_int(name: str, default: int) -> int:
     return int(value) if value else default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return value.strip().lower() not in {"0", "false", "no"}
+
+
 def _split_origins(value: str) -> list[str]:
     return [origin.strip() for origin in value.split(",") if origin.strip()]
 
@@ -123,6 +130,56 @@ def main() -> int:
         "(env: NIDS_AUTH_RATE_LIMIT_PER_MINUTE)",
     )
     parser.add_argument(
+        "--slack-webhook-url",
+        default=os.environ.get("NIDS_SLACK_WEBHOOK_URL"),
+        help="Slack incoming-webhook URL; omitted means the Slack notification channel "
+        "is never configured (env: NIDS_SLACK_WEBHOOK_URL, see docs/NOTIFICATIONS.md)",
+    )
+    parser.add_argument(
+        "--smtp-host",
+        default=os.environ.get("NIDS_SMTP_HOST"),
+        help="SMTP server for the email notification channel; omitted means the email "
+        "channel is never configured (env: NIDS_SMTP_HOST, see docs/NOTIFICATIONS.md)",
+    )
+    parser.add_argument(
+        "--smtp-port", type=int, default=_env_int("NIDS_SMTP_PORT", 587),
+        help="SMTP port (env: NIDS_SMTP_PORT)",
+    )
+    parser.add_argument(
+        "--smtp-username", default=os.environ.get("NIDS_SMTP_USERNAME"),
+        help="SMTP auth username; omitted means unauthenticated SMTP (env: NIDS_SMTP_USERNAME)",
+    )
+    parser.add_argument(
+        "--smtp-password", default=os.environ.get("NIDS_SMTP_PASSWORD"),
+        help="SMTP auth password (env: NIDS_SMTP_PASSWORD)",
+    )
+    parser.add_argument(
+        "--smtp-from", dest="smtp_from_addr", default=os.environ.get("NIDS_SMTP_FROM"),
+        help="'From' address for notification emails (env: NIDS_SMTP_FROM)",
+    )
+    parser.add_argument(
+        "--notify-email-to",
+        action="append",
+        default=[],
+        dest="smtp_to_addrs",
+        help="send notification emails to this address (repeatable); omitted entirely "
+        "falls back to the comma-separated NIDS_SMTP_TO env var. The email channel is "
+        "only configured if --smtp-host and at least one recipient are both set.",
+    )
+    parser.add_argument(
+        "--smtp-no-tls",
+        action="store_true",
+        default=not _env_bool("NIDS_SMTP_USE_TLS", True),
+        help="disable STARTTLS for the email channel (env: NIDS_SMTP_USE_TLS=false)",
+    )
+    parser.add_argument(
+        "--notification-min-severity",
+        choices=["low", "medium", "high", "critical"],
+        default=os.environ.get("NIDS_NOTIFICATION_MIN_SEVERITY", "high"),
+        help="minimum Alert severity that actually notifies a configured channel "
+        "(env: NIDS_NOTIFICATION_MIN_SEVERITY, see docs/NOTIFICATIONS.md)",
+    )
+    parser.add_argument(
         "--log-level",
         default=os.environ.get("NIDS_LOG_LEVEL", "INFO"),
         help="root logger level, e.g. DEBUG/INFO/WARNING (env: NIDS_LOG_LEVEL)",
@@ -142,6 +199,7 @@ def main() -> int:
     setup_logging(args.log_level, json_format=(args.log_format == "json"))
 
     cors_origins = args.cors_origins or _split_origins(os.environ.get("NIDS_CORS_ORIGINS", ""))
+    smtp_to_addrs = args.smtp_to_addrs or _split_origins(os.environ.get("NIDS_SMTP_TO", ""))
 
     config = ServingConfig(
         run_id=args.run_id,
@@ -158,6 +216,15 @@ def main() -> int:
         max_upload_size_bytes=args.max_upload_size,
         session_ttl_seconds=args.session_ttl_seconds,
         auth_rate_limit_per_minute=args.auth_rate_limit,
+        slack_webhook_url=args.slack_webhook_url,
+        smtp_host=args.smtp_host,
+        smtp_port=args.smtp_port,
+        smtp_username=args.smtp_username,
+        smtp_password=args.smtp_password,
+        smtp_from_addr=args.smtp_from_addr,
+        smtp_to_addrs=tuple(smtp_to_addrs),
+        smtp_use_tls=not args.smtp_no_tls,
+        notification_min_severity=args.notification_min_severity,
     )
     app = create_app(config)
 

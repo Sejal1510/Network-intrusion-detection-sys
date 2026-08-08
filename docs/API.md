@@ -474,13 +474,13 @@ or route, not a restructure of `nids/api`:
   (Milestone 10).** `nids/api/rate_limit.py`, `nids/api/logging_config.py`,
   `nids/api/metrics.py`, and the `audit_events` table in `nids/api/store.py`
   respectively. Full design in [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
-- **Notification integrations (email/Slack/Teams/...).** `nids.api.alerts.
-  NotificationChannel` is a documented, unimplemented `Protocol`
-  (`send(alert: Alert) -> None`) — a future `nids/api/notifications/
-  {email,slack,teams}.py` each implement it, and a future dispatcher calls
-  every configured channel whenever `generate_alert` returns non-`None`.
-  `Alert` is already a plain, serializable dataclass any channel can
-  format; nothing in `alerts.py` changes to add one.
+- **Notification integrations (Slack/email) — done (Milestone 12).**
+  `nids/api/notifications/{slack,email_channel,dispatcher,publish}.py`
+  implement `nids.api.alerts.NotificationChannel` and dispatch
+  fire-and-forget (off the request path) whenever `generate_alert`
+  returns non-`None` and meets a configurable minimum severity. Teams
+  (or any other channel) is the same one-method interface away. Full
+  design in [`docs/NOTIFICATIONS.md`](NOTIFICATIONS.md).
 - **Threat intelligence feeds.** A future enrichment stage between MITRE
   mapping and alerting (e.g. IP reputation) is another pure function
   consuming `PredictionResult`/the raw record, composed the same way

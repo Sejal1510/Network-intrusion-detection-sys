@@ -538,3 +538,61 @@ def test_predict_batch_returns_413_when_upload_exceeds_max_size(persisted_client
     )
 
     assert response.status_code == 413
+
+
+def test_predict_with_slack_configured_notifies_on_critical_alert(fixture_df, valid_record, tmp_path, monkeypatch):
+    """End-to-end: a real app, with a real (mocked-at-the-HTTP-boundary)
+    Slack channel configured, actually gets a POST out of a critical
+    /predict call -- config -> nids.api.app.build_channels ->
+    _lifespan's dispatcher startup -> _notify -> the "notifications" bus
+    channel -> the dispatcher -> SlackNotificationChannel.send, all real
+    except the final `requests.post`. Needs `with TestClient(app) as
+    client:` (unlike the module's plain `client` fixture) so `_lifespan`
+    -- and therefore the dispatcher task -- actually runs."""
+    posted = []
+
+    def fake_post(url, json, timeout):
+        posted.append((url, json))
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+        return FakeResponse()
+
+    monkeypatch.setattr("nids.api.notifications.slack.requests.post", fake_post)
+
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        artifact_root=tmp_path / "runs",
+        run_name="slack-fixture-run",
+    )
+    run_training(config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+
+    serving_config = ServingConfig(
+        run_id="slack-fixture-run",
+        artifact_root=tmp_path / "runs",
+        alert_threshold=0.0,
+        notification_min_severity="low",
+        slack_webhook_url="https://hooks.slack.example/T000/B000/xxx",
+    )
+    app = create_app(serving_config)
+
+    with TestClient(app) as client:
+        response = client.post("/predict", json=valid_record)
+        assert response.status_code == 200
+        assert response.json()["alert_id"] is not None
+
+        # The dispatcher runs as a background asyncio task; give the
+        # event loop a beat to run it after the synchronous /predict
+        # call returns.
+        import time
+
+        for _ in range(50):
+            if posted:
+                break
+            time.sleep(0.02)
+
+    assert len(posted) == 1
+    assert posted[0][0] == "https://hooks.slack.example/T000/B000/xxx"

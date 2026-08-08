@@ -30,7 +30,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.engine import Engine
 
-from nids.api.alerts import Alert, generate_alert
+from nids.api.alerts import Alert, generate_alert, meets_min_severity
 from nids.api.config import ServingConfig
 from nids.api.explain import Explanation, explain_one
 from nids.api.inference import PredictionResult, predict_one
@@ -170,14 +170,26 @@ def finish_record(
     persist: bool = True,
     source: str = "api",
     device_id: str | None = None,
+    notify: Callable[[Alert], None] | None = None,
 ) -> PredictResponse:
     """risk -> mitre -> alert -> optional persist -> response, given an
-    already-computed prediction (and, optionally, explanation)."""
+    already-computed prediction (and, optionally, explanation).
+
+    `notify`, if given, is called with the `Alert` when one is generated
+    *and* its severity meets `config.notification_min_severity` -- the
+    caller (`nids.api.app`/`nids.api.worker`) decides what "notify"
+    means (see `nids.api.notifications.publish.schedule_alert_publish`);
+    this module stays free of any bus/asyncio import, matching its own
+    "pure orchestration" docstring."""
     risk_score = compute_risk_score(result)
     mitre = map_to_mitre(result.attack_category)
     alert = generate_alert(
         result, risk_score, mitre, explanation, threshold=config.alert_threshold, source=source
     )
+    if alert is not None and notify is not None and meets_min_severity(
+        alert.level, config.notification_min_severity
+    ):
+        notify(alert)
 
     if persist:
         run_id, label_column, anomaly_run_id = run_ids(served_ensemble)
@@ -210,6 +222,7 @@ def process_record(
     persist: bool = True,
     source: str = "api",
     device_id: str | None = None,
+    notify: Callable[[Alert], None] | None = None,
 ) -> PredictResponse:
     """Run one raw record through the full pipeline: predict -> optional
     explain -> risk -> mitre -> alert -> optional persist -> response.
@@ -233,4 +246,5 @@ def process_record(
         persist=persist,
         source=source,
         device_id=device_id,
+        notify=notify,
     )

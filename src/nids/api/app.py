@@ -37,6 +37,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pandas.errors import EmptyDataError, ParserError
 
+from nids.api.alerts import Alert
 from nids.api.auth import router as auth_router
 from nids.api.broadcast import router as broadcast_router
 from nids.api.bus import InMemoryBus, create_bus
@@ -50,6 +51,9 @@ from nids.api.logging_config import RequestLoggingMiddleware
 from nids.api.metrics import Metrics, PrometheusMiddleware, create_metrics, metrics_response
 from nids.api.mitre import list_all_mappings
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
+from nids.api.notifications import build_channels
+from nids.api.notifications.dispatcher import run_notification_dispatcher
+from nids.api.notifications.publish import schedule_alert_publish
 from nids.api.pipeline import finish_record, process_record, row_to_json_safe_dict
 from nids.api.rate_limit import create_rate_limiter
 from nids.api.schemas import (
@@ -152,6 +156,27 @@ def model_info(served_ensemble: ServedEnsembleDep) -> ModelInfoResponse:
     )
 
 
+def _notify(app: FastAPI, alert: Alert) -> None:
+    """`notify=` callback passed into `process_record`/`finish_record`
+    (see `nids.api.pipeline`) -- always wired in, regardless of whether
+    any notification channel is configured: publishing to the
+    `"notifications"` bus channel with zero subscribers is a documented
+    no-op (see `nids.api.bus`), so there's nothing to gate here. Safe to
+    call from `/predict`'s synchronous route body (runs in FastAPI's
+    threadpool) via `event_loop`, captured once in `_lifespan`.
+
+    `event_loop` is unset if `_lifespan` never ran -- e.g. a test using
+    `TestClient(app)` without the `with` context manager, which most of
+    this suite does, since most tests need neither the worker nor the
+    notification dispatcher started. Treated as "nothing to publish to,"
+    not an error: a route otherwise unrelated to notifications shouldn't
+    fail because of it."""
+    loop = getattr(app.state, "event_loop", None)
+    if loop is None:
+        return
+    schedule_alert_publish(app.state.bus, loop, alert)
+
+
 _EXPLAIN_QUERY = Query(False, description="Include a SHAP-based explanation of the classifier's prediction.")
 
 
@@ -174,6 +199,7 @@ def predict(
                 config=config,
                 db_engine=request.app.state.db_engine,
                 explain=explain,
+                notify=lambda alert: _notify(request.app, alert),
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -239,6 +265,7 @@ async def predict_batch_csv(
             explanation,
             config=config,
             db_engine=db_engine,
+            notify=lambda alert: _notify(request.app, alert),
         )
         if row_response.alert_id is not None:
             metrics.alerts_raised_total.labels(source="api").inc()
@@ -259,7 +286,19 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     Streams consumer groups; auto-starting a second in-process consumer
     there would just be a redundant, harder-to-reason-about competing
     consumer in the same group.
+
+    Also captures the running loop (`app.state.event_loop`) -- needed by
+    `_notify` to schedule a `"notifications"` publish from `/predict`'s
+    synchronous route body, which FastAPI runs in a threadpool thread,
+    not this loop's own thread (see `nids.api.notifications.publish`) --
+    and starts the notification dispatcher (`nids.api.notifications.
+    dispatcher.run_notification_dispatcher`) as a background task, for
+    *both* bus tiers, but only if `app.state.notification_channels` is
+    non-empty (see that module's docstring for why in-process is safe
+    here unlike the live worker, and its one real limitation).
     """
+    app.state.event_loop = asyncio.get_running_loop()
+
     worker_task: asyncio.Task | None = None
     if isinstance(app.state.bus, InMemoryBus):
         worker_task = asyncio.create_task(
@@ -271,13 +310,23 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 app.state.metrics,
             )
         )
+
+    notification_task: asyncio.Task | None = None
+    if app.state.notification_channels:
+        notification_task = asyncio.create_task(
+            run_notification_dispatcher(
+                app.state.bus, app.state.notification_channels, app.state.metrics
+            )
+        )
+
     try:
         yield
     finally:
-        if worker_task is not None:
-            worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await worker_task
+        for task in (worker_task, notification_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
 
 def create_app(config: ServingConfig) -> FastAPI:
@@ -290,7 +339,10 @@ def create_app(config: ServingConfig) -> FastAPI:
     `config.redis_url` is set (see `nids.api.bus`) -- live monitoring
     works out of the box with zero new infrastructure either way.
     `secret_key` (for agent pairing tokens, see `nids.api.agent_auth`) is
-    generated once at startup if not set explicitly.
+    generated once at startup if not set explicitly. `notification_channels`
+    (see `nids.api.notifications`) is an empty list unless
+    `slack_webhook_url`/the `smtp_*` fields are set -- `_lifespan` only
+    starts the notification dispatcher if it's non-empty.
     """
     app = FastAPI(title="NIDS Inference API", lifespan=_lifespan)
     app.add_middleware(RequestLoggingMiddleware)
@@ -311,6 +363,7 @@ def create_app(config: ServingConfig) -> FastAPI:
     app.state.db_engine = create_db_engine(config.database_url) if config.database_url else None
     app.state.bus = create_bus(config.redis_url)
     app.state.rate_limiter = create_rate_limiter(config.redis_url)
+    app.state.notification_channels = build_channels(config)
     app.state.secret_key = config.secret_key or secrets.token_urlsafe(32)
     app.include_router(router)
     app.include_router(history_router)
