@@ -117,6 +117,52 @@ list and a caveat about `nids_prediction_duration_seconds`'s two route
 labels not being apples-to-apples in
 [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#metrics).
 
+### `GET /metrics/summary`
+
+A JSON-friendly read of the same counters `/metrics` exposes in
+Prometheus text format — for the dashboard's Metrics page (Milestone 14),
+which has no Prometheus/Grafana stack to query `/metrics` itself.
+Login-gated (unlike `/metrics`, which stays public for a real Prometheus
+scraper). Full design in
+[`docs/OBSERVABILITY.md`](OBSERVABILITY.md#metrics).
+
+**Response** (`MetricsSummaryResponse`)
+```json
+{
+  "http_requests_total": 42,
+  "alerts_by_source": { "api": 5, "rule": 2 },
+  "notifications_by_channel": { "SlackNotificationChannel": { "success": 3, "failure": 1 } },
+  "predictions_by_route": { "/predict": 10 },
+  "avg_prediction_duration_seconds": { "/predict": 0.057 }
+}
+```
+
+### `GET /rules`
+
+The configured signature-detection rules (`nids.api.rules`, Milestone
+13) — so a dashboard can show which detections are armed, not just that
+a past alert happened to say `source="rule"`. Login-gated: unlike
+`/mitre` (pure reference data), knowing exact detection thresholds is
+itself security-relevant information. Full design in
+[`docs/RULES.md`](RULES.md).
+
+**Response** (`list[RuleResponse]`)
+```json
+[
+  {
+    "id": "R001",
+    "name": "SYN flood pattern",
+    "description": "...",
+    "severity": "critical",
+    "conditions": [
+      { "field": "flag", "operator": "eq", "value": "S0" },
+      { "field": "count", "operator": "gt", "value": 100 }
+    ],
+    "mitre": { "tactic": "Impact", "techniques": ["..."] }
+  }
+]
+```
+
 ### `GET /model`
 
 Metadata and evaluation metrics for the currently served run(s) —

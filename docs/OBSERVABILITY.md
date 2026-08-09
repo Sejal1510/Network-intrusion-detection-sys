@@ -92,17 +92,32 @@ than once; the default registry raises on duplicate metric registration.
 | `nids_http_requests_total` | Counter | `method`, `route`, `status` | Every HTTP request, by route *template* (e.g. `/history/predictions/{prediction_id}`, not the resolved path — bounded cardinality) |
 | `nids_http_request_duration_seconds` | Histogram | `method`, `route`, `status` | Request latency |
 | `nids_prediction_duration_seconds` | Histogram | `route` | Prediction latency — **see caveat below** |
-| `nids_alerts_raised_total` | Counter | `source` (`api`/`agent`) | Every alert raised, incremented wherever a response already exposes `alert_id is not None` |
+| `nids_alerts_raised_total` | Counter | `source` (`api`/`agent`/`rule`) | Every `Alert` actually generated, incremented once per alert (see below) |
+| `nids_notifications_sent_total` | Counter | `channel`, `status` (`success`/`failure`) | Every notification channel send attempt (Milestone 12) |
 
 **Caveat: `nids_prediction_duration_seconds`'s two `route` labels aren't
 apples-to-apples.** `route="/predict/batch"` wraps exactly
 `nids.api.inference.predict_batch` — pure inference. `route="/predict"`
 wraps the whole per-record pipeline (`nids.api.pipeline.process_record`),
 because `/predict` has no inference-only call site in `app.py` to isolate
-without either instrumenting `pipeline.py` itself (breaking its "stay
-pure, no HTTP/observability imports" design) or duplicating orchestration
-logic in the route. Documented here and in the metric's own `HELP` text
-rather than hidden.
+without either instrumenting `pipeline.py` itself or duplicating
+orchestration logic in the route. Documented here and in the metric's
+own `HELP` text rather than hidden.
+
+**`nids_alerts_raised_total`'s `source` label lives inside
+`nids.api.pipeline.finish_record`, not at the route level (unlike every
+other metric here).** Milestone 10 originally incremented it at each
+call site (`app.py`/`worker.py`) with a hardcoded `"api"`/`"agent"`
+label — correct until Milestone 13 added rule-based detection, at which
+point it silently undercounted: a rule-sourced alert alongside an ML one
+was never counted at all, because the route only sees
+`PredictResponse.alert_id` (one id, naming only the higher-severity
+alert), not the full list `finish_record` actually generated. Fixed in
+Milestone 14, discovered by the Metrics dashboard page itself (see
+below) — its "alerts by source" chart could never show a "rule" bar
+until this moved. Now `finish_record` increments once per `Alert` it
+actually produces, labeled with that alert's own `.source`, since only
+it knows the true count and each one's real source.
 
 Point a local Prometheus at it:
 
@@ -150,13 +165,16 @@ filter out.
 
 ## What's intentionally not here yet
 
-- **No dashboard surfacing.** `GET /history/audit`/`GET /metrics` are
-  backend-only in this milestone — no `frontend/` page consumes them yet.
-  Same "API first, dashboard later" sequencing Milestone 5 (Security
-  Intelligence layer) used before Milestone 7 (the dashboard) existed.
-- **No per-user rate limits or auth.** Rate limiting is per client IP,
-  the only identity concept that exists — same limitation as the audit
-  trail's `actor` field, same future fix.
+- **Dashboard surfacing — done (Milestone 14).** An Audit Log page
+  (`GET /history/audit`) and a Metrics page (`GET /metrics/summary`, a
+  JSON-friendly read of the same counters `/metrics` exposes in
+  Prometheus text format) — both login-gated, any authenticated user,
+  same "API first, dashboard later" sequencing Milestone 5 used before
+  Milestone 7 existed. Full design in [`docs/DASHBOARD.md`](DASHBOARD.md).
+- **No per-user rate limits.** Rate limiting is still per client IP —
+  unlike the audit trail's `actor` field (which does record the
+  logged-in username where a route requires one, since Milestone 11),
+  rate-limit keys were never revisited to use identity instead of IP.
 - **No log shipping / centralized log aggregation.** `NIDS_LOG_FORMAT=json`
   makes the output ready to ship (e.g. to a log aggregator's stdout
   collector in a container platform), but no shipper is configured here —

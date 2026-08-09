@@ -110,6 +110,29 @@ separate `python -m nids.agent` process):
   only because `/predict/batch` is documented (and its route code
   confirms) to score rows in upload order.
 
+### Pages added since Milestone 7
+
+- **Login** (Milestone 11) — `POST /auth/login`, redirects to wherever
+  `RequireAuth` bounced the visitor from.
+- **Devices** (Milestone 11, admin-only) — `GET /devices` +
+  `POST /devices/{id}/revoke`, the same list/action shape as Alerts'
+  acknowledge button.
+- **Audit Log** (Milestone 14, any authenticated user, not admin-gated —
+  matches `/history/audit`'s own auth level) — `GET /history/audit`,
+  filterable by event type/actor, paginated. Every login, device pairing/
+  revocation, and alert acknowledgement the server has recorded.
+- **Metrics** (Milestone 14, any authenticated user) — `GET
+  /metrics/summary`, a JSON-friendly read of the same counters `GET
+  /metrics` exposes in Prometheus text format, so the dashboard doesn't
+  need a Prometheus/Grafana stack to show them. Stat tiles plus two bar
+  charts (alerts by source, notification delivery by channel). Full
+  design in [`docs/OBSERVABILITY.md`](OBSERVABILITY.md).
+- **Overview** also gained a "Detection rules armed" panel (Milestone
+  14) — `GET /rules`, listing every configured signature (id, name,
+  severity, description) so an analyst can see what's armed without
+  reading `detection_rules.yaml` directly. Full design in
+  [`docs/RULES.md`](RULES.md).
+
 ## Why not alternatives
 
 - **No Redux/Zustand.** TanStack Query already owns all server state;
