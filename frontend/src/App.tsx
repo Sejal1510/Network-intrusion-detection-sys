@@ -8,6 +8,8 @@ import { HistoryPage } from "@/routes/HistoryPage"
 import { ManualPredictPage } from "@/routes/ManualPredictPage"
 import { BatchUploadPage } from "@/routes/BatchUploadPage"
 import { DevicesPage } from "@/routes/DevicesPage"
+import { AuditPage } from "@/routes/AuditPage"
+import { MetricsPage } from "@/routes/MetricsPage"
 import { NotFoundPage } from "@/routes/NotFoundPage"
 
 function App() {
@@ -21,6 +23,8 @@ function App() {
           <Route path="history" element={<HistoryPage />} />
           <Route path="predict" element={<ManualPredictPage />} />
           <Route path="upload" element={<BatchUploadPage />} />
+          <Route path="audit" element={<AuditPage />} />
+          <Route path="metrics" element={<MetricsPage />} />
           <Route element={<RequireAuth role="admin" />}>
             <Route path="devices" element={<DevicesPage />} />
           </Route>

@@ -7,6 +7,8 @@ const LINKS = [
   { to: "/history", label: "History" },
   { to: "/predict", label: "Manual Predict" },
   { to: "/upload", label: "CSV Upload" },
+  { to: "/audit", label: "Audit Log" },
+  { to: "/metrics", label: "Metrics" },
 ]
 
 export function Sidebar() {

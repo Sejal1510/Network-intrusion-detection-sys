@@ -1,11 +1,15 @@
 import { useMemo } from "react"
 import { StatTile } from "@/components/common/StatTile"
+import { SeverityBadge } from "@/components/common/SeverityBadge"
+import { LoadingSkeleton } from "@/components/common/LoadingSkeleton"
+import { ErrorState } from "@/components/common/ErrorState"
 import { DegradedModeBanner } from "@/components/layout/DegradedModeBanner"
 import { ConnectionStatusIndicator } from "@/components/layout/ConnectionStatusIndicator"
 import { LiveFeedTable } from "@/components/tables/LiveFeedTable"
 import { SeverityDistributionChart } from "@/components/charts/SeverityDistributionChart"
 import { PredictionsOverTimeChart } from "@/components/charts/PredictionsOverTimeChart"
 import { useLiveFeed, type LiveFeedEntry } from "@/hooks/useLiveFeed"
+import { useRules } from "@/hooks/useRules"
 import { formatPercent } from "@/lib/format"
 import type { Severity } from "@/api/types"
 
@@ -17,6 +21,7 @@ function isAttack(entry: LiveFeedEntry): boolean {
 
 export function OverviewPage() {
   const { status, entries } = useLiveFeed()
+  const { data: rules, isLoading: rulesLoading, isError: rulesError } = useRules()
 
   const stats = useMemo(() => {
     const total = entries.length
@@ -59,6 +64,33 @@ export function OverviewPage() {
       <div>
         <h3 className="mb-2 text-sm font-medium text-[var(--text-primary)]">Live feed</h3>
         <LiveFeedTable entries={entries} />
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-medium text-[var(--text-primary)]">
+          Detection rules armed
+        </h3>
+        {rulesLoading && <LoadingSkeleton rows={3} />}
+        {rulesError && <ErrorState message="Could not load detection rules." />}
+        {rules && (
+          <div className="space-y-2">
+            {rules.map((rule) => (
+              <div
+                key={rule.id}
+                className="flex items-start justify-between gap-4 rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-3"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-[var(--text-muted)]">{rule.id}</span>
+                    <span className="text-sm font-medium text-[var(--text-primary)]">{rule.name}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{rule.description}</p>
+                </div>
+                <SeverityBadge severity={rule.severity} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

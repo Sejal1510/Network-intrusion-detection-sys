@@ -1,5 +1,5 @@
 import { apiClient } from "@/api/client"
-import type { AlertHistoryResponse, PredictionHistoryResponse } from "@/api/types"
+import type { AlertHistoryResponse, AuditEventResponse, PredictionHistoryResponse } from "@/api/types"
 
 function toQueryString(params: object): string {
   const search = new URLSearchParams()
@@ -43,4 +43,17 @@ export function listAlerts(filters: AlertHistoryFilters): Promise<AlertHistoryRe
 
 export function acknowledgeAlert(alertId: string) {
   return apiClient.post(`/history/alerts/${alertId}/acknowledge`)
+}
+
+export interface AuditEventFilters {
+  event_type?: string
+  actor?: string
+  start_date?: string
+  end_date?: string
+  limit?: number
+  offset?: number
+}
+
+export function listAuditEvents(filters: AuditEventFilters): Promise<AuditEventResponse> {
+  return apiClient.get<AuditEventResponse>(`/history/audit${toQueryString(filters)}`)
 }

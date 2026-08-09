@@ -176,6 +176,45 @@ export interface DeviceListResponse {
   offset: number
 }
 
+export interface AuditEventItem {
+  id: string
+  created_at: string
+  event_type: string
+  actor: string
+  target_id: string | null
+  detail: string | null
+}
+
+export interface AuditEventResponse {
+  items: AuditEventItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface RuleCondition {
+  field: string
+  operator: string
+  value: string | number
+}
+
+export interface Rule {
+  id: string
+  name: string
+  description: string
+  severity: Severity
+  conditions: RuleCondition[]
+  mitre: MitreMapping | null
+}
+
+export interface MetricsSummary {
+  http_requests_total: number
+  alerts_by_source: Record<string, number>
+  notifications_by_channel: Record<string, Record<string, number>>
+  predictions_by_route: Record<string, number>
+  avg_prediction_duration_seconds: Record<string, number>
+}
+
 /** One raw connection record -- the 41 fields of nids.data.schema.FEATURE_COLUMNS. */
 export type PredictRequest = Record<string, string | number>
 
