@@ -8,6 +8,32 @@ import { useRevokeDevice } from "@/hooks/useRevokeDevice"
 
 const LIMIT = 20
 
+/** Status chip mirroring SeverityBadge's pill formula -- shape (check vs. cross), not just color, carries the distinction. */
+function DeviceStatus({ revoked }: { revoked: boolean }) {
+  const colorVar = revoked ? "--status-critical" : "--status-good"
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
+      style={{
+        color: `var(${colorVar})`,
+        borderColor: `var(${colorVar})`,
+        backgroundColor: `color-mix(in srgb, var(${colorVar}) 12%, transparent)`,
+      }}
+    >
+      {revoked ? (
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden="true">
+          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden="true">
+          <path d="M3 8.5l3 3 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      {revoked ? "Revoked" : "Active"}
+    </span>
+  )
+}
+
 export function DevicesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const offset = Number(searchParams.get("offset") ?? 0)
@@ -48,13 +74,7 @@ export function DevicesPage() {
                       {device.last_seen_at ?? "Never"}
                     </td>
                     <td className="px-3 py-2">
-                      <span
-                        style={{
-                          color: device.revoked ? "var(--status-critical)" : "var(--status-good)",
-                        }}
-                      >
-                        {device.revoked ? "Revoked" : "Active"}
-                      </span>
+                      <DeviceStatus revoked={device.revoked} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       {!device.revoked && (

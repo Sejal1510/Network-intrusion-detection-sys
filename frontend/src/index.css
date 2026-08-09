@@ -308,12 +308,6 @@ select:focus-visible,
   }
 }
 
-@keyframes sweep-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes blob-drift {
   from {
     transform: translate(0, 0) scale(1);
@@ -403,6 +397,9 @@ select:focus-visible,
 }
 
 .bg-sweep {
+  /* Static by request -- was a 56s CSS rotation; kept as a fixed radar-beam
+     shape instead of an animated one, to save the continuous compositing
+     cost on lower-end devices. */
   position: absolute;
   top: -20vmax;
   right: -20vmax;
@@ -410,7 +407,6 @@ select:focus-visible,
   height: 72vmax;
   border-radius: 50%;
   background: conic-gradient(from 0deg, color-mix(in srgb, var(--accent) 30%, transparent), transparent 15%, transparent 100%);
-  animation: sweep-spin 56s linear infinite;
   -webkit-mask-image: radial-gradient(circle, black 55%, transparent 78%);
   mask-image: radial-gradient(circle, black 55%, transparent 78%);
 }
