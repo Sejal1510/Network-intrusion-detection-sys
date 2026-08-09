@@ -75,30 +75,32 @@ export function AuditPage() {
       {data && data.items.length === 0 && <EmptyState message="No audit events match these filters." />}
       {data && data.items.length > 0 && (
         <>
-          <table className="w-full text-left text-sm">
-            <thead className="text-[var(--text-secondary)]">
-              <tr className="border-b border-[var(--border-hairline)]">
-                <th className="py-2 font-medium">Time</th>
-                <th className="py-2 font-medium">Event</th>
-                <th className="py-2 font-medium">Actor</th>
-                <th className="py-2 font-medium">Target</th>
-                <th className="py-2 font-medium">Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((event) => (
-                <tr key={event.id} className="data-row border-b border-[var(--border-hairline)]">
-                  <td className="py-2 text-[var(--text-secondary)]">
-                    {new Date(event.created_at).toLocaleString()}
-                  </td>
-                  <td className="py-2 text-[var(--text-primary)]">{event.event_type}</td>
-                  <td className="py-2 text-[var(--text-secondary)]">{event.actor}</td>
-                  <td className="py-2 text-[var(--text-muted)]">{event.target_id ?? "—"}</td>
-                  <td className="py-2 text-[var(--text-muted)]">{event.detail ?? "—"}</td>
+          <div className="overflow-x-auto rounded-lg border border-[var(--border-hairline)]">
+            <table className="w-full text-left text-sm">
+              <thead className="text-[var(--text-secondary)]">
+                <tr className="border-b border-[var(--border-hairline)]">
+                  <th className="px-3 py-2 font-medium">Time</th>
+                  <th className="px-3 py-2 font-medium">Event</th>
+                  <th className="px-3 py-2 font-medium">Actor</th>
+                  <th className="px-3 py-2 font-medium">Target</th>
+                  <th className="px-3 py-2 font-medium">Detail</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.items.map((event) => (
+                  <tr key={event.id} className="data-row border-b border-[var(--border-hairline)] last:border-0">
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">
+                      {new Date(event.created_at).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-[var(--text-primary)]">{event.event_type}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">{event.actor}</td>
+                    <td className="px-3 py-2 text-[var(--text-muted)]">{event.target_id ?? "—"}</td>
+                    <td className="px-3 py-2 text-[var(--text-muted)]">{event.detail ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <Pagination
             offset={data.offset}
             limit={data.limit}

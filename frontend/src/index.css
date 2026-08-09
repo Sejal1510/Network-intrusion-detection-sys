@@ -438,6 +438,23 @@ select:focus-visible,
   animation-delay: -9s;
 }
 
+/* ============ Mobile off-canvas navigation (below md only) ============
+   Slides via transform in both directions; `visibility` flips instantly on
+   open but is delayed to match the close transition so the panel's links
+   drop out of the tab order/accessibility tree only once fully offscreen,
+   rather than merely being hidden behind a translateX. */
+
+.mobile-nav-panel {
+  visibility: hidden;
+  transform: translateX(-100%);
+  transition: transform 0.28s cubic-bezier(0.16, 0.8, 0.24, 1), visibility 0s linear 0.28s;
+}
+.mobile-nav-panel.is-open {
+  visibility: visible;
+  transform: translateX(0);
+  transition: transform 0.28s cubic-bezier(0.16, 0.8, 0.24, 1), visibility 0s linear 0s;
+}
+
 /* ============ Core Hub hero visual (Overview only) ============ */
 
 .hero-visual {
@@ -477,6 +494,7 @@ select:focus-visible,
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }

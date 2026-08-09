@@ -28,49 +28,51 @@ export function DevicesPage() {
       {data && data.items.length === 0 && <EmptyState message="No devices paired yet." />}
       {data && data.items.length > 0 && (
         <>
-          <table className="w-full text-left text-sm">
-            <thead className="text-[var(--text-secondary)]">
-              <tr className="border-b border-[var(--border-hairline)]">
-                <th className="py-2 font-medium">Name</th>
-                <th className="py-2 font-medium">Paired at</th>
-                <th className="py-2 font-medium">Last seen</th>
-                <th className="py-2 font-medium">Status</th>
-                <th className="py-2 font-medium" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((device) => (
-                <tr key={device.id} className="data-row border-b border-[var(--border-hairline)]">
-                  <td className="py-2 text-[var(--text-primary)]">{device.name}</td>
-                  <td className="py-2 text-[var(--text-secondary)]">{device.paired_at}</td>
-                  <td className="py-2 text-[var(--text-secondary)]">
-                    {device.last_seen_at ?? "Never"}
-                  </td>
-                  <td className="py-2">
-                    <span
-                      style={{
-                        color: device.revoked ? "var(--status-critical)" : "var(--status-good)",
-                      }}
-                    >
-                      {device.revoked ? "Revoked" : "Active"}
-                    </span>
-                  </td>
-                  <td className="py-2 text-right">
-                    {!device.revoked && (
-                      <button
-                        type="button"
-                        onClick={() => revoke.mutate(device.id)}
-                        disabled={revoke.isPending && revoke.variables === device.id}
-                        className="rounded border border-[var(--border-hairline)] px-2 py-1 text-xs transition-colors hover:border-[color-mix(in_srgb,var(--status-critical)_40%,transparent)] hover:text-[var(--status-critical)] disabled:opacity-40"
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
+          <div className="overflow-x-auto rounded-lg border border-[var(--border-hairline)]">
+            <table className="w-full text-left text-sm">
+              <thead className="text-[var(--text-secondary)]">
+                <tr className="border-b border-[var(--border-hairline)]">
+                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium">Paired at</th>
+                  <th className="px-3 py-2 font-medium">Last seen</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.items.map((device) => (
+                  <tr key={device.id} className="data-row border-b border-[var(--border-hairline)] last:border-0">
+                    <td className="px-3 py-2 text-[var(--text-primary)]">{device.name}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">{device.paired_at}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">
+                      {device.last_seen_at ?? "Never"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        style={{
+                          color: device.revoked ? "var(--status-critical)" : "var(--status-good)",
+                        }}
+                      >
+                        {device.revoked ? "Revoked" : "Active"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {!device.revoked && (
+                        <button
+                          type="button"
+                          onClick={() => revoke.mutate(device.id)}
+                          disabled={revoke.isPending && revoke.variables === device.id}
+                          className="rounded border border-[var(--border-hairline)] px-2 py-1 text-xs transition-colors hover:border-[color-mix(in_srgb,var(--status-critical)_40%,transparent)] hover:text-[var(--status-critical)] disabled:opacity-40"
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {revoke.isError && (
             <ErrorState
               message={revoke.error instanceof Error ? revoke.error.message : "Revoke failed."}
