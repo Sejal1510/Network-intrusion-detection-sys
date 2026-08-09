@@ -8,9 +8,9 @@ export function TopBar() {
   const { user, logout } = useUserAuthContext()
 
   return (
-    <header className="flex items-center justify-between border-b border-[var(--border-hairline)] px-6 py-3">
+    <header className="surface-glass flex items-center justify-between border-b border-[var(--border-hairline)] px-6 py-3 shadow-[inset_0_1px_0_var(--border-soft)]">
       <div>
-        <h1 className="text-sm font-semibold text-[var(--text-primary)]">NIDS Dashboard</h1>
+        <h1 className="font-mono text-sm font-semibold tracking-wide text-[var(--text-primary)]">NIDS Dashboard</h1>
         {model && (
           <p className="text-xs text-[var(--text-muted)]">
             Serving {model.model_name} ({model.run_id})
@@ -20,11 +20,9 @@ export function TopBar() {
       <div className="flex items-center gap-4 text-xs">
         <div className="flex items-center gap-2">
           <span
-            className="h-2 w-2 rounded-full"
+            className={`h-2 w-2 rounded-full ${health?.model_loaded ? "animate-[pulse-ring_2.4s_ease-out_infinite]" : ""}`}
             style={{
-              backgroundColor: health?.model_loaded
-                ? "var(--status-good)"
-                : "var(--status-critical)",
+              backgroundColor: health?.model_loaded ? "var(--status-good)" : "var(--status-critical)",
             }}
             aria-hidden="true"
           />
@@ -40,7 +38,7 @@ export function TopBar() {
             <button
               type="button"
               onClick={() => void logout()}
-              className="rounded border border-[var(--border-hairline)] px-2 py-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              className="rounded border border-[var(--border-hairline)] px-2 py-1 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] hover:bg-[color-mix(in_srgb,var(--text-primary)_6%,transparent)]"
             >
               Sign out
             </button>

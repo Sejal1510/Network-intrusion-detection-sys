@@ -38,14 +38,22 @@ function Icon({ icon }: { icon: "check" | "warning" | "alert" }) {
   )
 }
 
-export function SeverityBadge({ severity }: { severity: Severity }) {
+export function SeverityBadge({
+  severity,
+  pulse = false,
+}: {
+  severity: Severity
+  /** Event-triggered only (e.g. a critical row that just arrived) -- decays after 3 pulses, never loops ambiently. */
+  pulse?: boolean
+}) {
   const meta = severityMeta(severity)
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium"
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${pulse ? "badge-pulse" : ""}`}
       style={{
         color: `var(${meta.colorVar})`,
         borderColor: `var(${meta.colorVar})`,
+        backgroundColor: `color-mix(in srgb, var(${meta.colorVar}) 12%, transparent)`,
       }}
     >
       <Icon icon={meta.icon} />

@@ -1,4 +1,5 @@
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis } from "recharts"
+import { Card } from "@/components/common/Card"
 import type { Severity } from "@/api/types"
 import { severityMeta } from "@/lib/severity"
 
@@ -12,7 +13,7 @@ export function SeverityDistributionChart({ counts }: { counts: Record<Severity,
   }))
 
   return (
-    <div className="rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-4">
+    <Card>
       <h3 className="mb-2 text-sm font-medium text-[var(--text-primary)]">Severity distribution</h3>
       <ResponsiveContainer width="100%" height={180}>
         <BarChart data={data} margin={{ top: 16, right: 8, left: 8, bottom: 0 }}>
@@ -25,11 +26,14 @@ export function SeverityDistributionChart({ counts }: { counts: Record<Severity,
           <Tooltip
             cursor={{ fill: "var(--gridline)" }}
             contentStyle={{
-              background: "var(--surface-card)",
+              background: "var(--surface-elevated)",
               border: "1px solid var(--border-hairline)",
-              borderRadius: 6,
+              borderRadius: 8,
               fontSize: 12,
+              boxShadow: "var(--shadow-rest)",
             }}
+            labelStyle={{ color: "var(--text-primary)", fontWeight: 600, marginBottom: 2 }}
+            itemStyle={{ color: "var(--text-secondary)" }}
           />
           <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={48}>
             <LabelList dataKey="count" position="top" style={{ fill: "var(--text-secondary)", fontSize: 12 }} />
@@ -39,6 +43,6 @@ export function SeverityDistributionChart({ counts }: { counts: Record<Severity,
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </Card>
   )
 }

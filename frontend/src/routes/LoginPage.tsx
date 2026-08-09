@@ -1,6 +1,8 @@
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate } from "react-router-dom"
 import { LoginForm } from "@/components/auth/LoginForm"
+import { Card } from "@/components/common/Card"
+import { NetworkBackground } from "@/components/layout/NetworkBackground"
 import { useUserAuthContext } from "@/context/UserAuthProvider"
 
 export function LoginPage() {
@@ -28,14 +30,17 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-6 rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-6">
+    <div className="relative flex min-h-svh items-center justify-center p-6">
+      <NetworkBackground />
+      <Card interactive={false} className="relative z-10 w-full max-w-sm space-y-6">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--text-primary)]">NIDS Dashboard</h1>
+          <h1 className="font-mono text-lg font-semibold tracking-wide text-[var(--text-primary)]">
+            NIDS Dashboard
+          </h1>
           <p className="text-sm text-[var(--text-secondary)]">Sign in to continue.</p>
         </div>
         <LoginForm onSubmit={handleSubmit} submitting={submitting} error={error} />
-      </div>
+      </Card>
     </div>
   )
 }

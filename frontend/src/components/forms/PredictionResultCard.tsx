@@ -1,3 +1,4 @@
+import { Card } from "@/components/common/Card"
 import { SeverityBadge } from "@/components/common/SeverityBadge"
 import { MitreChip } from "@/components/common/MitreChip"
 import { ExplanationBarChart } from "@/components/forms/ExplanationBarChart"
@@ -6,7 +7,7 @@ import type { PredictResponse } from "@/api/types"
 
 export function PredictionResultCard({ result }: { result: PredictResponse }) {
   return (
-    <div className="space-y-4 rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-4">
+    <Card className="space-y-4" accent={result.severity === "critical" ? "critical" : undefined}>
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Prediction</div>
@@ -77,6 +78,6 @@ export function PredictionResultCard({ result }: { result: PredictResponse }) {
       )}
 
       {result.explanation && <ExplanationBarChart explanation={result.explanation} />}
-    </div>
+    </Card>
   )
 }

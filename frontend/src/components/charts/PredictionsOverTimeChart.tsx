@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { Card } from "@/components/common/Card"
 import type { LiveFeedEntry } from "@/hooks/useLiveFeed"
 
 const BUCKET_COUNT = 20
@@ -52,7 +53,7 @@ export function PredictionsOverTimeChart({ entries }: { entries: LiveFeedEntry[]
   const data = bucketEntries(entries)
 
   return (
-    <div className="rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-4">
+    <Card>
       <h3 className="mb-2 text-sm font-medium text-[var(--text-primary)]">Predictions over time</h3>
       <ResponsiveContainer width="100%" height={220}>
         <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -71,12 +72,16 @@ export function PredictionsOverTimeChart({ entries }: { entries: LiveFeedEntry[]
             allowDecimals={false}
           />
           <Tooltip
+            cursor={{ stroke: "var(--accent)", strokeWidth: 1, strokeDasharray: "3 3" }}
             contentStyle={{
-              background: "var(--surface-card)",
+              background: "var(--surface-elevated)",
               border: "1px solid var(--border-hairline)",
-              borderRadius: 6,
+              borderRadius: 8,
               fontSize: 12,
+              boxShadow: "var(--shadow-rest)",
             }}
+            labelStyle={{ color: "var(--text-primary)", fontWeight: 600, marginBottom: 2 }}
+            itemStyle={{ color: "var(--text-secondary)" }}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           <Area
@@ -85,12 +90,13 @@ export function PredictionsOverTimeChart({ entries }: { entries: LiveFeedEntry[]
             name="Predictions"
             stroke="var(--sequential-450)"
             fill="var(--sequential-450)"
-            fillOpacity={0.15}
+            fillOpacity={0.18}
             strokeWidth={2}
+            activeDot={{ r: 4, fill: "var(--accent)", stroke: "var(--surface-card)", strokeWidth: 2 }}
           />
           <Scatter dataKey="alerts" name="Alerts" fill="var(--status-critical)" />
         </ComposedChart>
       </ResponsiveContainer>
-    </div>
+    </Card>
   )
 }

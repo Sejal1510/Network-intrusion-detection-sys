@@ -5,6 +5,7 @@ import { LoadingSkeleton } from "@/components/common/LoadingSkeleton"
 import { ErrorState } from "@/components/common/ErrorState"
 import { DegradedModeBanner } from "@/components/layout/DegradedModeBanner"
 import { ConnectionStatusIndicator } from "@/components/layout/ConnectionStatusIndicator"
+import { CoreHubVisual } from "@/components/layout/CoreHubVisual"
 import { LiveFeedTable } from "@/components/tables/LiveFeedTable"
 import { SeverityDistributionChart } from "@/components/charts/SeverityDistributionChart"
 import { PredictionsOverTimeChart } from "@/components/charts/PredictionsOverTimeChart"
@@ -38,21 +39,29 @@ export function OverviewPage() {
   }, [entries])
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Overview</h2>
-        <ConnectionStatusIndicator status={status} />
+    <div className="space-y-8">
+      <div className="relative min-h-[170px] space-y-3 py-2">
+        <CoreHubVisual />
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Network overview</h2>
+          <ConnectionStatusIndicator status={status} />
+        </div>
+        <p className="max-w-xl text-sm text-[var(--text-muted)]">
+          Live posture across every monitored segment — one detection core evaluating every flow
+          against the trained classifier and the signature rule set together.
+        </p>
       </div>
 
       <DegradedModeBanner />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Total predictions" value={stats.total} />
-        <StatTile label="Normal" value={stats.normalCount} />
-        <StatTile label="Attacks detected" value={stats.attackCount} />
+        <StatTile label="Normal" value={stats.normalCount} accent="good" />
+        <StatTile label="Attacks detected" value={stats.attackCount} accent="critical" />
         <StatTile
           label="Safety score"
           value={stats.total === 0 ? "—" : formatPercent(stats.normalCount / stats.total)}
+          accent="good"
         />
       </div>
 
@@ -67,17 +76,18 @@ export function OverviewPage() {
       </div>
 
       <div>
-        <h3 className="mb-2 text-sm font-medium text-[var(--text-primary)]">
-          Detection rules armed
-        </h3>
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <h3 className="text-sm font-medium text-[var(--text-primary)]">Detection rules armed</h3>
+          {rules && <span className="text-xs text-[var(--text-muted)]">{rules.length} signature rules</span>}
+        </div>
         {rulesLoading && <LoadingSkeleton rows={3} />}
         {rulesError && <ErrorState message="Could not load detection rules." />}
         {rules && (
-          <div className="space-y-2">
+          <div className="divide-y divide-[var(--gridline)] rounded-lg border border-[var(--border-hairline)]">
             {rules.map((rule) => (
               <div
                 key={rule.id}
-                className="flex items-start justify-between gap-4 rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-3"
+                className="flex items-start justify-between gap-4 px-3 py-2.5 transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)]"
               >
                 <div>
                   <div className="flex items-center gap-2">

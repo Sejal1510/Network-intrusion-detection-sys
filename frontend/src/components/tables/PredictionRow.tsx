@@ -5,7 +5,7 @@ import type { PredictionHistoryItem } from "@/api/types"
 
 export function PredictionRow({ item }: { item: PredictionHistoryItem }) {
   return (
-    <tr className="border-b border-[var(--border-hairline)] align-top last:border-0">
+    <tr className="data-row border-b border-[var(--border-hairline)] align-top last:border-0">
       <td
         className="whitespace-nowrap px-3 py-2 text-[var(--text-muted)]"
         style={{ fontVariantNumeric: "tabular-nums" }}

@@ -1,65 +1,132 @@
 @import "tailwindcss";
 
 /*
- * Design tokens: chart chrome/ink + status palette, taken verbatim from the
- * dataviz skill's validated reference palette (references/palette.md) --
- * status colors are fixed and never themed, and severity badges/charts map
- * onto them by role (low->good, medium->warning, high->serious,
- * critical->critical), never a separate ad hoc color choice.
+ * Design tokens: NIDS "Sentinel" theme -- dark-first navy/cyan/indigo,
+ * with a genuine light counterpart, not an inverted afterthought. Status
+ * colors are semantic and shared by both themes' contrast needs (light
+ * mode uses darker shades of the same hues for AA contrast on a pale
+ * ground); severity badges/charts map onto them by role (low->good,
+ * medium->warning, high->serious, critical->critical), never an ad hoc
+ * color choice. --bg-*-rgb triples exist for NetworkBackground's canvas,
+ * which can't consume var()/color-mix() inside a 2D context fillStyle.
  */
 :root {
   color-scheme: light;
-  --surface-page: #f9f9f7;
-  --surface-card: #fcfcfb;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --border-hairline: rgba(11, 11, 11, 0.1);
-  --gridline: #e1e0d9;
-  --axis: #c3c2b7;
+  --surface-page: #f2f6fb;
+  --surface-card: #ffffff;
+  --surface-elevated: #e7edf6;
+  --border-hairline: rgba(16, 38, 68, 0.12);
+  --border-soft: rgba(11, 21, 38, 0.04);
+  --text-primary: #0b1526;
+  --text-secondary: #42536c;
+  --text-muted: #7c8aa0;
+  --gridline: #e3e9f2;
+  --axis: #c7d1e0;
 
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #d03b3b;
+  --accent: #0e7490;
+  --accent-2: #4f46e5;
+  --accent-contrast: #ffffff;
 
-  --sequential-400: #3987e5;
-  --sequential-450: #2a78d6;
-  --sequential-550: #1c5cab;
+  --status-good: #15803d;
+  --status-warning: #b45309;
+  --status-serious: #c2410c;
+  --status-critical: #b91c1c;
+  --status-critical-glow: rgba(185, 28, 28, 0.22);
 
-  /* Diverging pair (blue<->red) for polarity data, e.g. SHAP contributions. */
-  --diverging-positive: #2a78d6;
-  --diverging-negative: #e34948;
+  --sequential-400: #38bdf8;
+  --sequential-450: #0e7490;
+  --sequential-550: #0c4a5e;
+
+  --diverging-positive: #0e7490;
+  --diverging-negative: #c0392b;
+
+  --shadow-rest: 0 1px 2px rgba(20, 30, 50, 0.06), 0 10px 24px -18px rgba(20, 30, 50, 0.12);
+  --shadow-hover: 0 1px 2px rgba(20, 30, 50, 0.08), 0 20px 40px -18px color-mix(in srgb, var(--accent) 25%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 25%, var(--border-hairline));
+
+  --bg-line-rgb: 15, 42, 74;
+  --bg-node-rgb: 14, 116, 144;
+  --bg-packet-rgb: 8, 47, 73;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --surface-page: #0d0d0d;
-    --surface-card: #1a1a19;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --border-hairline: rgba(255, 255, 255, 0.1);
-    --gridline: #2c2c2a;
-    --axis: #383835;
-    --diverging-positive: #3987e5;
-    --diverging-negative: #e66767;
+    --surface-page: #060a12;
+    --surface-card: #101927;
+    --surface-elevated: #111b2c;
+    --border-hairline: rgba(148, 178, 214, 0.16);
+    --border-soft: rgba(255, 255, 255, 0.05);
+    --text-primary: #eef3fb;
+    --text-secondary: #9fb0c9;
+    --text-muted: #66748c;
+    --gridline: #182233;
+    --axis: #233047;
+
+    --accent: #22d3ee;
+    --accent-2: #6366f1;
+    --accent-contrast: #04141a;
+
+    --status-good: #34d399;
+    --status-warning: #f5b942;
+    --status-serious: #ff8a4c;
+    --status-critical: #ff5468;
+    --status-critical-glow: rgba(255, 84, 104, 0.4);
+
+    --sequential-400: #67e8f9;
+    --sequential-450: #22d3ee;
+    --sequential-550: #0e7490;
+
+    --diverging-positive: #22d3ee;
+    --diverging-negative: #ff6b6b;
+
+    --shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 24px -18px rgba(0, 0, 0, 0.6);
+    --shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.5), 0 20px 44px -16px color-mix(in srgb, var(--accent) 40%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--accent) 30%, var(--border-hairline));
+
+    --bg-line-rgb: 56, 189, 248;
+    --bg-node-rgb: 34, 211, 238;
+    --bg-packet-rgb: 186, 230, 253;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --surface-page: #0d0d0d;
-  --surface-card: #1a1a19;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #898781;
-  --border-hairline: rgba(255, 255, 255, 0.1);
-  --gridline: #2c2c2a;
-  --axis: #383835;
-  --diverging-positive: #3987e5;
-  --diverging-negative: #e66767;
+  --surface-page: #060a12;
+  --surface-card: #101927;
+  --surface-elevated: #111b2c;
+  --border-hairline: rgba(148, 178, 214, 0.16);
+  --border-soft: rgba(255, 255, 255, 0.05);
+  --text-primary: #eef3fb;
+  --text-secondary: #9fb0c9;
+  --text-muted: #66748c;
+  --gridline: #182233;
+  --axis: #233047;
+
+  --accent: #22d3ee;
+  --accent-2: #6366f1;
+  --accent-contrast: #04141a;
+
+  --status-good: #34d399;
+  --status-warning: #f5b942;
+  --status-serious: #ff8a4c;
+  --status-critical: #ff5468;
+  --status-critical-glow: rgba(255, 84, 104, 0.4);
+
+  --sequential-400: #67e8f9;
+  --sequential-450: #22d3ee;
+  --sequential-550: #0e7490;
+
+  --diverging-positive: #22d3ee;
+  --diverging-negative: #ff6b6b;
+
+  --shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 24px -18px rgba(0, 0, 0, 0.6);
+  --shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.5), 0 20px 44px -16px color-mix(in srgb, var(--accent) 40%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 30%, var(--border-hairline));
+
+  --bg-line-rgb: 56, 189, 248;
+  --bg-node-rgb: 34, 211, 238;
+  --bg-packet-rgb: 186, 230, 253;
 }
 
 body {
@@ -67,8 +134,349 @@ body {
   background-color: var(--surface-page);
   color: var(--text-primary);
   font-family:
-    system-ui,
     -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI Variable",
     "Segoe UI",
+    system-ui,
     sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Accessibility: every interactive element gets a real focus ring -- the
+   pre-redesign app had none at all (browser UA default only). */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============ Shared surfaces ============ */
+
+.surface-glass {
+  background: color-mix(in srgb, var(--surface-elevated) 80%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-rest), inset 0 1px 0 var(--border-soft);
+  transition: transform 0.18s ease, box-shadow 0.25s ease, border-color 0.18s ease;
+}
+
+.card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.card--interactive::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%);
+  transition: opacity 0.25s ease;
+}
+
+.card--interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-hairline));
+}
+
+.card--interactive:hover::after {
+  opacity: 1;
+}
+
+.card--quiet {
+  background: color-mix(in srgb, var(--surface-page) 40%, var(--surface-card));
+  box-shadow: none;
+}
+
+.card--quiet:hover {
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--border-hairline));
+}
+
+.card--accent-good::before,
+.card--accent-critical::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  z-index: 2;
+}
+.card--accent-good::before {
+  background: var(--status-good);
+}
+.card--accent-critical::before {
+  background: var(--status-critical);
+}
+
+/* ============ Table row polish ============ */
+
+.data-row {
+  position: relative;
+  transition: background-color 0.15s ease;
+}
+.data-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+.data-row:hover {
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+.data-row:hover::before {
+  background: var(--accent);
+}
+.data-row--enter {
+  animation: row-in 0.6s ease;
+}
+
+/* ============ Severity pulse (event-triggered, not ambient) ============ */
+
+.badge-pulse {
+  animation: pulse-decay 1s ease-out 3;
+}
+
+/* ============ Route transition ============ */
+
+.route-transition {
+  animation: reveal-in 0.4s cubic-bezier(0.16, 0.8, 0.24, 1);
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+    background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    background-color: transparent;
+  }
+}
+
+@keyframes pulse-decay {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--status-critical-glow);
+  }
+  15% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-good) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sweep-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes blob-drift {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(3%, -4%) scale(1.06);
+  }
+}
+
+@keyframes trace-pulse {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+/* ============ Living-network background (Topology Mesh + Signal Field) ============
+   Fixed behind the whole app shell. Sidebar/topbar are translucent so it
+   shows through there; every content card/table/panel is fully opaque, so
+   it recedes automatically wherever there's data to read -- see
+   NetworkBackground.tsx and Card's `.card` (opaque, no blur). */
+
+.bg-root {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bg-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.bg-base {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(1200px 760px at 84% -8%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 62%),
+    radial-gradient(1000px 680px at -12% 108%, color-mix(in srgb, var(--accent-2) 5%, transparent), transparent 60%), var(--surface-page);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .bg-base {
+    background: radial-gradient(1200px 760px at 84% -8%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%),
+      radial-gradient(1000px 680px at -12% 108%, color-mix(in srgb, var(--accent-2) 13%, transparent), transparent 60%),
+      radial-gradient(1400px 900px at 50% 50%, transparent 40%, rgba(0, 0, 0, 0.3) 100%), var(--surface-page);
+  }
+}
+:root[data-theme="dark"] .bg-base {
+  background: radial-gradient(1200px 760px at 84% -8%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%),
+    radial-gradient(1000px 680px at -12% 108%, color-mix(in srgb, var(--accent-2) 13%, transparent), transparent 60%),
+    radial-gradient(1400px 900px at 50% 50%, transparent 40%, rgba(0, 0, 0, 0.3) 100%), var(--surface-page);
+}
+
+.bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(var(--gridline) 1px, transparent 1px), linear-gradient(90deg, var(--gridline) 1px, transparent 1px);
+  background-size: 42px 42px;
+  opacity: 0.5;
+  -webkit-mask-image: radial-gradient(1200px 850px at 78% 4%, black, transparent 80%);
+  mask-image: radial-gradient(1200px 850px at 78% 4%, black, transparent 80%);
+}
+
+.bg-rings {
+  position: absolute;
+  top: -20vmax;
+  right: -20vmax;
+  width: 72vmax;
+  height: 72vmax;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 90px color-mix(in srgb, var(--accent) 4%, transparent) inset, 0 0 0 180px color-mix(in srgb, var(--accent) 3%, transparent) inset;
+}
+
+.bg-sweep {
+  position: absolute;
+  top: -20vmax;
+  right: -20vmax;
+  width: 72vmax;
+  height: 72vmax;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, color-mix(in srgb, var(--accent) 30%, transparent), transparent 15%, transparent 100%);
+  animation: sweep-spin 56s linear infinite;
+  -webkit-mask-image: radial-gradient(circle, black 55%, transparent 78%);
+  mask-image: radial-gradient(circle, black 55%, transparent 78%);
+}
+
+.bg-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(2px);
+  animation: blob-drift 48s ease-in-out infinite alternate;
+}
+.bg-blob--a {
+  width: 48vmax;
+  height: 48vmax;
+  left: -16vmax;
+  bottom: -20vmax;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 17%, transparent), transparent 68%);
+}
+.bg-blob--b {
+  width: 38vmax;
+  height: 38vmax;
+  right: 4vmax;
+  bottom: 0;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 68%);
+  animation-duration: 62s;
+  animation-delay: -9s;
+}
+
+/* ============ Core Hub hero visual (Overview only) ============ */
+
+.hero-visual {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(880px, 72%);
+  height: 420px;
+  overflow: visible;
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, black 44%, transparent 86%);
+  mask-image: linear-gradient(to bottom, black 0%, black 44%, transparent 86%);
+}
+.hero-visual svg {
+  position: absolute;
+  top: -40px;
+  right: -60px;
+  width: 900px;
+  height: 600px;
+  overflow: visible;
+}
+.hero-pulse {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--bg-packet-rgb));
+  box-shadow: 0 0 10px 3px rgba(var(--bg-packet-rgb), 0.65);
+  left: 0;
+  top: 0;
+  animation: trace-pulse 7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

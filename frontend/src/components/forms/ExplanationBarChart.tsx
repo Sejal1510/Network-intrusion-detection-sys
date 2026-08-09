@@ -1,4 +1,5 @@
 import { Bar, BarChart, Cell, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Card } from "@/components/common/Card"
 import type { Explanation } from "@/api/types"
 
 export function ExplanationBarChart({ explanation }: { explanation: Explanation }) {
@@ -11,7 +12,7 @@ export function ExplanationBarChart({ explanation }: { explanation: Explanation 
     }))
 
   return (
-    <div className="rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-4">
+    <Card>
       <h3 className="mb-1 text-sm font-medium text-[var(--text-primary)]">Why this prediction</h3>
       <p className="mb-3 text-xs text-[var(--text-secondary)]">{explanation.summary}</p>
       <ResponsiveContainer width="100%" height={Math.max(160, data.length * 28)}>
@@ -54,6 +55,6 @@ export function ExplanationBarChart({ explanation }: { explanation: Explanation 
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </Card>
   )
 }

@@ -87,7 +87,7 @@ export function AuditPage() {
             </thead>
             <tbody>
               {data.items.map((event) => (
-                <tr key={event.id} className="border-b border-[var(--border-hairline)]">
+                <tr key={event.id} className="data-row border-b border-[var(--border-hairline)]">
                   <td className="py-2 text-[var(--text-secondary)]">
                     {new Date(event.created_at).toLocaleString()}
                   </td>

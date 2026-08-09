@@ -40,7 +40,7 @@ export function DevicesPage() {
             </thead>
             <tbody>
               {data.items.map((device) => (
-                <tr key={device.id} className="border-b border-[var(--border-hairline)]">
+                <tr key={device.id} className="data-row border-b border-[var(--border-hairline)]">
                   <td className="py-2 text-[var(--text-primary)]">{device.name}</td>
                   <td className="py-2 text-[var(--text-secondary)]">{device.paired_at}</td>
                   <td className="py-2 text-[var(--text-secondary)]">
@@ -61,7 +61,7 @@ export function DevicesPage() {
                         type="button"
                         onClick={() => revoke.mutate(device.id)}
                         disabled={revoke.isPending && revoke.variables === device.id}
-                        className="rounded border border-[var(--border-hairline)] px-2 py-1 text-xs disabled:opacity-40"
+                        className="rounded border border-[var(--border-hairline)] px-2 py-1 text-xs transition-colors hover:border-[color-mix(in_srgb,var(--status-critical)_40%,transparent)] hover:text-[var(--status-critical)] disabled:opacity-40"
                       >
                         Revoke
                       </button>

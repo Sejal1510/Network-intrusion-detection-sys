@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Card } from "@/components/common/Card"
 import { StatTile } from "@/components/common/StatTile"
 import { LoadingSkeleton } from "@/components/common/LoadingSkeleton"
 import { ErrorState } from "@/components/common/ErrorState"
@@ -9,10 +10,10 @@ import { titleCase } from "@/lib/format"
 
 function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] p-4">
+    <Card>
       <h3 className="mb-2 text-sm font-medium text-[var(--text-primary)]">{title}</h3>
       {children}
-    </div>
+    </Card>
   )
 }
 
