@@ -596,3 +596,80 @@ def test_predict_with_slack_configured_notifies_on_critical_alert(fixture_df, va
 
     assert len(posted) == 1
     assert posted[0][0] == "https://hooks.slack.example/T000/B000/xxx"
+
+
+@pytest.fixture
+def authenticated_client(fixture_df, tmp_path):
+    """A client with database_url configured (CurrentUserDep needs a
+    db_engine to look up sessions) and a logged-in session already
+    attached -- same pattern test_api_history.py's `client` fixture
+    uses, for /rules and /metrics/summary (both login-gated, unlike
+    /mitre and /metrics)."""
+    from nids.api.user_auth import create_session, register_user
+
+    config = TrainingConfig(
+        model_name="random_forest",
+        model_params={"n_estimators": 5},
+        artifact_root=tmp_path / "runs",
+        run_name="app-fixture-run",
+    )
+    run_training(config, train_df=fixture_df, test_df=fixture_df, log_to_mlflow=False)
+
+    serving_config = ServingConfig(
+        run_id="app-fixture-run",
+        artifact_root=tmp_path / "runs",
+        database_url=f"sqlite:///{tmp_path / 'auth.db'}",
+    )
+    app = create_app(serving_config)
+    test_client = TestClient(app)
+    user = register_user(app.state.db_engine, "analyst1", "hunter2", "analyst")
+    session = create_session(app.state.db_engine, user.id, ttl_seconds=3600)
+    test_client.headers.update({"Authorization": f"Bearer {session.token}"})
+    return test_client, app
+
+
+def test_rules_requires_authentication(persisted_client):
+    """A database-configured but unauthenticated client -- with no
+    db_engine at all (the plain `client` fixture), CurrentUserDep 503s
+    before it ever gets to check for a token; this exercises the actual
+    401 path, matching test_api_history.py's unauthenticated_client
+    pattern."""
+    test_client, _ = persisted_client
+    response = test_client.get("/rules")
+    assert response.status_code == 401
+
+
+def test_rules_returns_the_configured_rules(authenticated_client):
+    test_client, _ = authenticated_client
+
+    response = test_client.get("/rules")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) >= 4
+    ids = [r["id"] for r in body]
+    assert "R001" in ids
+    r001 = next(r for r in body if r["id"] == "R001")
+    assert r001["severity"] == "critical"
+    assert r001["conditions"]
+    assert r001["mitre"]["tactic"] == "Impact"
+
+
+def test_metrics_summary_requires_authentication(persisted_client):
+    test_client, _ = persisted_client
+    response = test_client.get("/metrics/summary")
+    assert response.status_code == 401
+
+
+def test_metrics_summary_reflects_real_activity(authenticated_client, valid_record):
+    test_client, _ = authenticated_client
+
+    test_client.post("/predict", json=valid_record)
+
+    response = test_client.get("/metrics/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["http_requests_total"] >= 1
+    assert "/predict" in body["predictions_by_route"]
+    assert body["predictions_by_route"]["/predict"] >= 1

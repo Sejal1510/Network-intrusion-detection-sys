@@ -34,6 +34,7 @@ from nids.api.alerts import Alert, generate_alert, meets_min_severity, severity_
 from nids.api.config import ServingConfig
 from nids.api.explain import Explanation, explain_one
 from nids.api.inference import PredictionResult, predict_one
+from nids.api.metrics import Metrics
 from nids.api.mitre import MitreMapping, map_to_mitre
 from nids.api.model_loader import ServedEnsemble
 from nids.api.risk import RiskScore, compute_risk_score
@@ -180,6 +181,7 @@ def finish_record(
     source: str = "api",
     device_id: str | None = None,
     notify: Callable[[Alert], None] | None = None,
+    metrics: Metrics | None = None,
 ) -> PredictResponse:
     """risk -> mitre -> alert -> optional persist -> response, given an
     already-computed prediction (and, optionally, explanation).
@@ -194,6 +196,16 @@ def finish_record(
     module stays free of any bus/asyncio import, matching its own "pure
     orchestration" docstring.
 
+    `metrics`, if given, gets `alerts_raised_total` incremented once per
+    `Alert` actually generated, labeled with that alert's own `.source`
+    -- not a caller-supplied transport label. This lives here (not at
+    the `nids.api.app`/`nids.api.worker` call sites, as it did before
+    rule-based detection existed) because only this function knows how
+    many alerts actually fired and what each one's real source is;
+    `PredictResponse.alert_id` names only the primary one, so a caller
+    working from the response alone would under-count whenever both an
+    ML and a rule alert fire for the same record.
+
     Rule evaluation runs against `record` (the raw feature dict) only --
     never against `result` -- so a rule can fire on a record the
     classifier doesn't flag at all, and vice versa; the two paths never
@@ -201,9 +213,9 @@ def finish_record(
     response is whichever is higher severity (`nids.api.alerts.
     severity_rank`; a tie prefers the rule match, since it's a
     deterministic signature hit rather than a probabilistic one) -- but
-    *both* are still persisted/notified independently; only the single
-    HTTP response field (`PredictResponse.alert_id`, unchanged shape for
-    frontend compatibility) can name just one.
+    *both* are still persisted/notified/counted independently; only the
+    single HTTP response field (`PredictResponse.alert_id`, unchanged
+    shape for frontend compatibility) can name just one.
     """
     risk_score = compute_risk_score(result)
     mitre = map_to_mitre(result.attack_category)
@@ -220,6 +232,10 @@ def finish_record(
         for alert in alerts:
             if meets_min_severity(alert.level, config.notification_min_severity):
                 notify(alert)
+
+    if metrics is not None:
+        for alert in alerts:
+            metrics.alerts_raised_total.labels(source=alert.source).inc()
 
     if persist:
         run_id, label_column, anomaly_run_id = run_ids(served_ensemble)
@@ -254,6 +270,7 @@ def process_record(
     source: str = "api",
     device_id: str | None = None,
     notify: Callable[[Alert], None] | None = None,
+    metrics: Metrics | None = None,
 ) -> PredictResponse:
     """Run one raw record through the full pipeline: predict -> optional
     explain -> risk -> mitre -> alert -> optional persist -> response.
@@ -278,4 +295,5 @@ def process_record(
         source=source,
         device_id=device_id,
         notify=notify,
+        metrics=metrics,
     )

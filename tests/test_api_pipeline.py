@@ -308,3 +308,29 @@ def test_finish_record_notify_called_for_both_alerts_when_both_qualify(served_en
 
     assert len(notified) == 2
     assert {a.source for a in notified} == {"api", "rule"}
+
+
+def test_finish_record_increments_alerts_raised_total_once_per_alert_by_real_source(
+    served_ensemble, valid_record
+):
+    """Regression test: alerts_raised_total's `source` label must come
+    from each Alert's own .source (rule vs api/agent transport), not a
+    single caller-supplied transport label -- otherwise a rule-sourced
+    alert alongside an ML one is silently never counted (see
+    docs/RULES.md and the Milestone 14 metrics fix)."""
+    from nids.api.metrics import create_metrics
+
+    record = {**valid_record, "flag": "S0", "count": 150}
+    always_alert_config = ServingConfig(run_id="test-run", alert_threshold=0.0)
+    metrics = create_metrics()
+
+    process_record(served_ensemble, record, config=always_alert_config, db_engine=None, metrics=metrics)
+
+    assert metrics.alerts_raised_total.labels(source="api")._value.get() == 1
+    assert metrics.alerts_raised_total.labels(source="rule")._value.get() == 1
+
+
+def test_finish_record_metrics_none_is_a_no_op(served_ensemble, valid_record, config):
+    """metrics is optional -- omitting it (as most tests already do)
+    must not raise."""
+    process_record(served_ensemble, valid_record, config=config, db_engine=None, metrics=None)

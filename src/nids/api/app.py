@@ -38,6 +38,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pandas.errors import EmptyDataError, ParserError
 
 from nids.api.alerts import Alert
+from nids.api.auth import CurrentUserDep
 from nids.api.auth import router as auth_router
 from nids.api.broadcast import router as broadcast_router
 from nids.api.bus import InMemoryBus, create_bus
@@ -48,7 +49,13 @@ from nids.api.history import router as history_router
 from nids.api.inference import predict_batch
 from nids.api.ingest import router as ingest_router
 from nids.api.logging_config import RequestLoggingMiddleware
-from nids.api.metrics import Metrics, PrometheusMiddleware, create_metrics, metrics_response
+from nids.api.metrics import (
+    Metrics,
+    PrometheusMiddleware,
+    create_metrics,
+    metrics_response,
+    metrics_summary,
+)
 from nids.api.mitre import list_all_mappings
 from nids.api.model_loader import ServedEnsemble, load_served_ensemble
 from nids.api.notifications import build_channels
@@ -56,15 +63,19 @@ from nids.api.notifications.dispatcher import run_notification_dispatcher
 from nids.api.notifications.publish import schedule_alert_publish
 from nids.api.pipeline import finish_record, process_record, row_to_json_safe_dict
 from nids.api.rate_limit import create_rate_limiter
+from nids.api.rules import load_rules
 from nids.api.schemas import (
     BatchPredictResponse,
     BatchPredictSummary,
     HealthResponse,
+    MetricsSummaryResponse,
     MitreMappingResponse,
     MitreTechniqueResponse,
     ModelInfoResponse,
     PredictRequest,
     PredictResponse,
+    RuleConditionResponse,
+    RuleResponse,
     ServedRunInfo,
 )
 from nids.api.store import create_db_engine
@@ -116,6 +127,25 @@ def metrics(request: Request) -> Response:
     return metrics_response(request.app.state.metrics)
 
 
+@router.get("/metrics/summary", response_model=MetricsSummaryResponse)
+def metrics_summary_route(request: Request, _current_user: CurrentUserDep) -> MetricsSummaryResponse:
+    """A JSON-friendly read of the same counters `/metrics` already
+    exposes, for the dashboard's Metrics page -- which has no
+    Prometheus/Grafana stack to query `/metrics`'s Prometheus text
+    format itself. Login-gated (unlike `/metrics`, which stays public
+    for a real Prometheus scraper): this specifically feeds the
+    authenticated dashboard, same reasoning `/history/*` already applies.
+    See `nids.api.metrics.metrics_summary`, docs/OBSERVABILITY.md."""
+    summary = metrics_summary(request.app.state.metrics)
+    return MetricsSummaryResponse(
+        http_requests_total=summary.http_requests_total,
+        alerts_by_source=summary.alerts_by_source,
+        notifications_by_channel=summary.notifications_by_channel,
+        predictions_by_route=summary.predictions_by_route,
+        avg_prediction_duration_seconds=summary.avg_prediction_duration_seconds,
+    )
+
+
 @router.get("/mitre", response_model=dict[str, MitreMappingResponse])
 def mitre_mappings() -> dict[str, MitreMappingResponse]:
     """The full ATT&CK category -> tactic/technique table (see
@@ -131,6 +161,40 @@ def mitre_mappings() -> dict[str, MitreMappingResponse]:
         )
         for category, mapping in list_all_mappings().items()
     }
+
+
+@router.get("/rules", response_model=list[RuleResponse])
+def rules(_current_user: CurrentUserDep) -> list[RuleResponse]:
+    """The configured signature-detection rules (see nids.api.rules) --
+    so a dashboard can show which detections are armed, not just that a
+    past alert happened to say source="rule". Login-gated (unlike
+    /mitre, pure reference data with no operational sensitivity):
+    knowing exact detection thresholds is itself security-relevant
+    information, same reasoning /history/* is login-gated."""
+    return [
+        RuleResponse(
+            id=rule.id,
+            name=rule.name,
+            description=rule.description,
+            severity=rule.severity,
+            conditions=[
+                RuleConditionResponse(field=c.field, operator=c.operator, value=c.value)
+                for c in rule.conditions
+            ],
+            mitre=(
+                MitreMappingResponse(
+                    tactic=rule.mitre.tactic,
+                    techniques=[
+                        MitreTechniqueResponse(id=t.id, name=t.name, url=t.url)
+                        for t in rule.mitre.techniques
+                    ],
+                )
+                if rule.mitre is not None
+                else None
+            ),
+        )
+        for rule in load_rules()
+    ]
 
 
 @router.get("/model", response_model=ModelInfoResponse)
@@ -200,11 +264,10 @@ def predict(
                 db_engine=request.app.state.db_engine,
                 explain=explain,
                 notify=lambda alert: _notify(request.app, alert),
+                metrics=metrics,
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if response.alert_id is not None:
-        metrics.alerts_raised_total.labels(source="api").inc()
     return response
 
 
@@ -266,9 +329,8 @@ async def predict_batch_csv(
             config=config,
             db_engine=db_engine,
             notify=lambda alert: _notify(request.app, alert),
+            metrics=metrics,
         )
-        if row_response.alert_id is not None:
-            metrics.alerts_raised_total.labels(source="api").inc()
         responses.append(row_response)
 
     return BatchPredictResponse(

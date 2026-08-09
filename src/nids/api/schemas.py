@@ -213,3 +213,26 @@ class DeviceListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class RuleConditionResponse(BaseModel):
+    field: str
+    operator: str
+    value: Any
+
+
+class RuleResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    severity: str
+    conditions: list[RuleConditionResponse]
+    mitre: MitreMappingResponse | None
+
+
+class MetricsSummaryResponse(BaseModel):
+    http_requests_total: float
+    alerts_by_source: dict[str, float]
+    notifications_by_channel: dict[str, dict[str, float]]
+    predictions_by_route: dict[str, float]
+    avg_prediction_duration_seconds: dict[str, float]

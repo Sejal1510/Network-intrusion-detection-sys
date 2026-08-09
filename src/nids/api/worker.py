@@ -73,6 +73,7 @@ async def process_flow_message(
             source="agent",
             device_id=device_id,
             notify=lambda alert: schedule_alert_publish(bus, asyncio.get_running_loop(), alert),
+            metrics=metrics,
         )
     except ValueError as exc:
         logger.warning("Dropping invalid flow record from device %s: %s", device_id, exc)
@@ -80,9 +81,6 @@ async def process_flow_message(
     except Exception:
         logger.exception("Unexpected error processing flow record from device %s", device_id)
         return
-
-    if response.alert_id is not None:
-        metrics.alerts_raised_total.labels(source="agent").inc()
     await bus.publish("live", response.model_dump(mode="json"))
 
 
