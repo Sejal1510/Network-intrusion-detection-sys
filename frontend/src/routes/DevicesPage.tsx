@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom"
-import { LoadingSkeleton } from "@/components/common/LoadingSkeleton"
+import { TableSkeleton } from "@/components/common/TableSkeleton"
 import { ErrorState } from "@/components/common/ErrorState"
 import { EmptyState } from "@/components/common/EmptyState"
 import { Pagination } from "@/components/common/Pagination"
@@ -49,7 +49,7 @@ export function DevicesPage() {
         immediately invalidates its token.
       </p>
 
-      {isLoading && <LoadingSkeleton rows={5} />}
+      {isLoading && <TableSkeleton rows={5} columns={5} />}
       {isError && <ErrorState message="Could not load devices. Is the server reachable?" />}
       {data && data.items.length === 0 && <EmptyState message="No devices paired yet." />}
       {data && data.items.length > 0 && (

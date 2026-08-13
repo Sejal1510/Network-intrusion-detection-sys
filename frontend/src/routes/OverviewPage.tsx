@@ -1,7 +1,6 @@
 import { useMemo } from "react"
 import { StatTile } from "@/components/common/StatTile"
 import { SeverityBadge } from "@/components/common/SeverityBadge"
-import { LoadingSkeleton } from "@/components/common/LoadingSkeleton"
 import { ErrorState } from "@/components/common/ErrorState"
 import { DegradedModeBanner } from "@/components/layout/DegradedModeBanner"
 import { ConnectionStatusIndicator } from "@/components/layout/ConnectionStatusIndicator"
@@ -13,6 +12,27 @@ import { useLiveFeed, type LiveFeedEntry } from "@/hooks/useLiveFeed"
 import { useRules } from "@/hooks/useRules"
 import { formatPercent } from "@/lib/format"
 import type { Severity } from "@/api/types"
+
+/** Shaped like a few rows of the real rules list instead of a generic bar list. */
+function RulesListSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading"
+      className="divide-y divide-[var(--gridline)] rounded-lg border border-[var(--border-hairline)]"
+    >
+      {Array.from({ length: 3 }, (_, i) => (
+        <div key={i} className="flex items-start justify-between gap-4 px-3 py-2.5">
+          <div className="space-y-1.5">
+            <div className="h-3 w-40 animate-pulse rounded bg-[var(--gridline)]" />
+            <div className="h-3 w-56 animate-pulse rounded bg-[var(--gridline)]" />
+          </div>
+          <div className="h-4 w-14 animate-pulse rounded bg-[var(--gridline)]" />
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function isAttack(entry: LiveFeedEntry): boolean {
   if (entry.attack_category) return entry.attack_category !== "normal"
@@ -80,7 +100,7 @@ export function OverviewPage() {
           <h3 className="text-sm font-medium text-[var(--text-primary)]">Detection rules armed</h3>
           {rules && <span className="text-xs text-[var(--text-muted)]">{rules.length} signature rules</span>}
         </div>
-        {rulesLoading && <LoadingSkeleton rows={3} />}
+        {rulesLoading && <RulesListSkeleton />}
         {rulesError && <ErrorState message="Could not load detection rules." />}
         {rules && (
           <div className="divide-y divide-[var(--gridline)] rounded-lg border border-[var(--border-hairline)]">

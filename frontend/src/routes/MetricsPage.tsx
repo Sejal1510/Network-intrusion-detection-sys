@@ -2,7 +2,6 @@ import type { ReactNode } from "react"
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Card } from "@/components/common/Card"
 import { StatTile } from "@/components/common/StatTile"
-import { LoadingSkeleton } from "@/components/common/LoadingSkeleton"
 import { ErrorState } from "@/components/common/ErrorState"
 import { EmptyState } from "@/components/common/EmptyState"
 import { useMetricsSummary } from "@/hooks/useMetricsSummary"
@@ -14,6 +13,30 @@ function ChartCard({ title, children }: { title: string; children: ReactNode }) 
       <h3 className="mb-2 text-sm font-medium text-[var(--text-primary)]">{title}</h3>
       {children}
     </Card>
+  )
+}
+
+/** Shaped like the page's real layout (KPI row + two chart cards) instead of a generic bar list. */
+function MetricsSkeleton() {
+  return (
+    <div role="status" aria-label="Loading" className="space-y-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        {Array.from({ length: 3 }, (_, i) => (
+          <Card key={i} interactive={false}>
+            <div className="h-3 w-20 animate-pulse rounded bg-[var(--gridline)]" />
+            <div className="mt-2 h-6 w-14 animate-pulse rounded bg-[var(--gridline)]" />
+          </Card>
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {Array.from({ length: 2 }, (_, i) => (
+          <Card key={i} interactive={false}>
+            <div className="h-3 w-32 animate-pulse rounded bg-[var(--gridline)]" />
+            <div className="mt-4 h-[180px] animate-pulse rounded bg-[var(--gridline)]" />
+          </Card>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -49,7 +72,7 @@ export function MetricsPage() {
         <code className="text-xs">GET /metrics</code> for the full Prometheus scrape).
       </p>
 
-      {isLoading && <LoadingSkeleton rows={5} />}
+      {isLoading && <MetricsSkeleton />}
       {isError && <ErrorState message="Could not load metrics. Is the server reachable?" />}
 
       {data && (

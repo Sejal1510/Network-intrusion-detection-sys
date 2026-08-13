@@ -1,7 +1,8 @@
 import { useSearchParams } from "react-router-dom"
 import { DegradedModeBanner } from "@/components/layout/DegradedModeBanner"
 import { Pagination } from "@/components/common/Pagination"
-import { LoadingSkeleton } from "@/components/common/LoadingSkeleton"
+import { FilterSelect } from "@/components/common/FilterSelect"
+import { TableSkeleton } from "@/components/common/TableSkeleton"
 import { ErrorState } from "@/components/common/ErrorState"
 import { EmptyState } from "@/components/common/EmptyState"
 import { useAuditEvents } from "@/hooks/useAuditEvents"
@@ -24,6 +25,8 @@ export function AuditPage() {
   const actor = searchParams.get("actor") ?? ""
   const offset = Number(searchParams.get("offset") ?? 0)
 
+  const hasActiveFilters = Boolean(eventType || actor)
+
   const { data, isLoading, isError } = useAuditEvents({
     event_type: eventType || undefined,
     actor: actor || undefined,
@@ -39,6 +42,14 @@ export function AuditPage() {
     setSearchParams(next)
   }
 
+  function clearFilters() {
+    const next = new URLSearchParams(searchParams)
+    next.delete("event_type")
+    next.delete("actor")
+    next.delete("offset")
+    setSearchParams(next)
+  }
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-[var(--text-primary)]">Audit Log</h2>
@@ -48,11 +59,11 @@ export function AuditPage() {
       </p>
       <DegradedModeBanner />
 
-      <div className="flex flex-wrap gap-3 text-sm">
-        <select
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <FilterSelect
+          aria-label="Filter by event type"
           value={eventType}
           onChange={(e) => updateParam("event_type", e.target.value)}
-          className="rounded border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2 py-1"
         >
           <option value="">All event types</option>
           {EVENT_TYPES.map((type) => (
@@ -60,17 +71,26 @@ export function AuditPage() {
               {type}
             </option>
           ))}
-        </select>
+        </FilterSelect>
         <input
           type="text"
           value={actor}
           onChange={(e) => updateParam("actor", e.target.value)}
           placeholder="Filter by actor (e.g. user:analyst1)"
-          className="rounded border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2 py-1"
+          className="rounded border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2 py-1 text-sm text-[var(--text-primary)] transition-colors placeholder:text-[var(--text-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--border-hairline))]"
         />
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {isLoading && <LoadingSkeleton rows={5} />}
+      {isLoading && <TableSkeleton rows={5} columns={5} />}
       {isError && <ErrorState message="Could not load the audit log. Is the server reachable?" />}
       {data && data.items.length === 0 && <EmptyState message="No audit events match these filters." />}
       {data && data.items.length > 0 && (
