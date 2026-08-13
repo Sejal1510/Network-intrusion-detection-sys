@@ -1,10 +1,13 @@
+import { useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { TableSkeleton } from "@/components/common/TableSkeleton"
 import { ErrorState } from "@/components/common/ErrorState"
 import { EmptyState } from "@/components/common/EmptyState"
 import { Pagination } from "@/components/common/Pagination"
+import { ConfirmDialog } from "@/components/common/ConfirmDialog"
 import { useDevices } from "@/hooks/useDevices"
 import { useRevokeDevice } from "@/hooks/useRevokeDevice"
+import type { DeviceListItem } from "@/api/types"
 
 const LIMIT = 20
 
@@ -40,6 +43,7 @@ export function DevicesPage() {
 
   const { data, isLoading, isError } = useDevices({ limit: LIMIT, offset })
   const revoke = useRevokeDevice()
+  const [pendingRevoke, setPendingRevoke] = useState<DeviceListItem | null>(null)
 
   return (
     <div className="space-y-4">
@@ -80,7 +84,7 @@ export function DevicesPage() {
                       {!device.revoked && (
                         <button
                           type="button"
-                          onClick={() => revoke.mutate(device.id)}
+                          onClick={() => setPendingRevoke(device)}
                           disabled={revoke.isPending && revoke.variables === device.id}
                           className="rounded border border-[var(--border-hairline)] px-2 py-1 text-xs transition-colors hover:border-[color-mix(in_srgb,var(--status-critical)_40%,transparent)] hover:text-[var(--status-critical)] disabled:opacity-40"
                         >
@@ -109,6 +113,20 @@ export function DevicesPage() {
             }}
           />
         </>
+      )}
+
+      {pendingRevoke && (
+        <ConfirmDialog
+          title="Revoke this device?"
+          description={`This immediately invalidates "${pendingRevoke.name}"'s token. This can't be undone.`}
+          confirmLabel="Revoke"
+          danger
+          pending={revoke.isPending}
+          onConfirm={() =>
+            revoke.mutate(pendingRevoke.id, { onSuccess: () => setPendingRevoke(null) })
+          }
+          onCancel={() => setPendingRevoke(null)}
+        />
       )}
     </div>
   )

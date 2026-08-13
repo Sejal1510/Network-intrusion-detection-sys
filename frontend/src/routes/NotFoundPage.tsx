@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom"
 import { Card } from "@/components/common/Card"
+import { buttonClassName } from "@/components/common/Button"
 
 export function NotFoundPage() {
   const location = useLocation()
@@ -28,10 +29,7 @@ export function NotFoundPage() {
           </p>
         </div>
 
-        <Link
-          to="/"
-          className="inline-flex items-center gap-2 rounded-md bg-[var(--text-primary)] px-4 py-2 text-sm font-medium text-[var(--surface-page)] transition-opacity hover:opacity-90"
-        >
+        <Link to="/" className={buttonClassName("primary")}>
           Back to Overview
         </Link>
       </Card>

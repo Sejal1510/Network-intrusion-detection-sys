@@ -13,6 +13,18 @@ export function setSessionToken(token: string | null): void {
   currentSessionToken = token
 }
 
+// Fired when a request that *carried* a session token comes back 401 --
+// i.e. a previously-valid session has expired or been revoked mid-use, as
+// opposed to a login attempt (no token attached yet) or a 403 role
+// mismatch (still a valid session, just not permitted). Registered once
+// by useUserAuth so client.ts never has to import React/auth state
+// itself -- same module-level-setter shape as setSessionToken above.
+let onUnauthorized: (() => void) | null = null
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler
+}
+
 export class ApiError extends Error {
   status: number
 
@@ -34,6 +46,7 @@ async function parseErrorDetail(response: Response): Promise<string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const hadToken = currentSessionToken !== null
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -47,6 +60,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
+    if (response.status === 401 && hadToken) onUnauthorized?.()
     throw new ApiError(response.status, await parseErrorDetail(response))
   }
 

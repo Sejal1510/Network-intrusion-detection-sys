@@ -32,11 +32,11 @@ export function BatchUploadPage() {
   const mutation = useBatchPredict()
   const [fileName, setFileName] = useState<string | null>(null)
   const [zippedRows, setZippedRows] = useState<ZippedRow[]>([])
-  const [parseError, setParseError] = useState<string | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
 
   async function handleFile(file: File) {
     setFileName(file.name)
-    setParseError(null)
+    setFileError(null)
     setZippedRows([])
     try {
       const [rows, response] = await Promise.all([
@@ -48,8 +48,12 @@ export function BatchUploadPage() {
       // mutation.isError already surfaces the API failure; a client-side
       // parse failure is separate since it can happen even if the
       // upload itself succeeds server-side.
-      setParseError("Could not parse the CSV file for the summary breakdown.")
+      setFileError("Could not parse the CSV file for the summary breakdown.")
     }
+  }
+
+  function handleInvalidFile(message: string) {
+    setFileError(message)
   }
 
   return (
@@ -59,7 +63,7 @@ export function BatchUploadPage() {
         Upload a CSV of raw connection records to score them all at once.
       </p>
 
-      <CsvDropzone onFileSelected={handleFile} disabled={mutation.isPending} />
+      <CsvDropzone onFileSelected={handleFile} onInvalidFile={handleInvalidFile} disabled={mutation.isPending} />
       {fileName && <p className="text-xs text-[var(--text-muted)]">Selected: {fileName}</p>}
 
       {mutation.isPending && <BatchSummarySkeleton />}
@@ -68,7 +72,7 @@ export function BatchUploadPage() {
           message={mutation.error instanceof Error ? mutation.error.message : "Batch prediction failed."}
         />
       )}
-      {parseError && <ErrorState message={parseError} />}
+      {fileError && <ErrorState message={fileError} />}
 
       {mutation.data && zippedRows.length > 0 && (
         <BatchSummaryPanel summary={mutation.data.summary} zippedRows={zippedRows} />

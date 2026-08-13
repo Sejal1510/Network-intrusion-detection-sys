@@ -1,6 +1,8 @@
 import { useState } from "react"
 import { CategoricalField } from "@/components/forms/fields/CategoricalField"
 import { NumericField } from "@/components/forms/fields/NumericField"
+import { Button } from "@/components/common/Button"
+import { Checkbox } from "@/components/common/Checkbox"
 import { MANUAL_PREDICT_FIELDS, MANUAL_PREDICT_GROUPS } from "@/components/forms/manualPredictFieldConfig"
 import type { PredictRequest } from "@/api/types"
 
@@ -57,21 +59,15 @@ export function ManualPredictForm({
       ))}
 
       <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-          <input
-            type="checkbox"
-            checked={explain}
-            onChange={(e) => setExplain(e.target.checked)}
-          />
-          Explain this prediction (SHAP)
-        </label>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-[var(--text-primary)] px-4 py-2 text-sm font-medium text-[var(--surface-page)] disabled:opacity-50"
-        >
+        <Checkbox
+          id="explain-shap"
+          checked={explain}
+          onChange={(e) => setExplain(e.target.checked)}
+          label="Explain this prediction (SHAP)"
+        />
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Predicting…" : "Predict"}
-        </button>
+        </Button>
       </div>
     </form>
   )

@@ -1,10 +1,14 @@
 import { useRef, useState } from "react"
+import { validateCsvFile } from "@/lib/csv"
 
 export function CsvDropzone({
   onFileSelected,
+  onInvalidFile,
   disabled,
 }: {
   onFileSelected: (file: File) => void
+  /** A file was dropped/picked but failed validateCsvFile -- onFileSelected is never called for it. */
+  onInvalidFile?: (message: string) => void
   disabled?: boolean
 }) {
   const [isDragging, setIsDragging] = useState(false)
@@ -12,7 +16,13 @@ export function CsvDropzone({
 
   function handleFiles(files: FileList | null) {
     const file = files?.[0]
-    if (file) onFileSelected(file)
+    if (!file) return
+    const error = validateCsvFile(file)
+    if (error) {
+      onInvalidFile?.(error)
+      return
+    }
+    onFileSelected(file)
   }
 
   return (

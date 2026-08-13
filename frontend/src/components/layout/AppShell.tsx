@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import { Outlet, useLocation } from "react-router-dom"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { TopBar } from "@/components/layout/TopBar"
 import { NetworkBackground } from "@/components/layout/NetworkBackground"
+import { RouteLoadingFallback } from "@/components/common/RouteLoadingFallback"
 
 export function AppShell() {
   const location = useLocation()
@@ -70,7 +71,9 @@ export function AppShell() {
           />
           <main className="min-w-0 flex-1 p-4 sm:p-6">
             <div key={location.pathname} className="route-transition">
-              <Outlet />
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <Outlet />
+              </Suspense>
             </div>
           </main>
         </div>

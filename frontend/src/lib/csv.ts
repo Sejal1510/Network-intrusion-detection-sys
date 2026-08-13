@@ -1,6 +1,25 @@
 import Papa from "papaparse"
 import type { PredictResponse } from "@/api/types"
 
+/**
+ * Extension + non-empty only -- these are the two things drag-and-drop
+ * currently lets through completely unchecked (the dropzone's native
+ * `accept=".csv"` only ever filters the OS file picker, never a drop).
+ * Deliberately doesn't try to enforce a byte-size ceiling: the server's
+ * max upload size is a runtime deployment setting (--max-upload-size /
+ * NIDS_MAX_UPLOAD_SIZE_BYTES), not a fixed constant safe to mirror here --
+ * an oversized file is still caught by the existing 413 -> ErrorState path.
+ */
+export function validateCsvFile(file: File): string | null {
+  if (!file.name.toLowerCase().endsWith(".csv")) {
+    return `"${file.name}" isn't a .csv file.`
+  }
+  if (file.size === 0) {
+    return `"${file.name}" is empty.`
+  }
+  return null
+}
+
 export function parseCsvFile(file: File): Promise<Record<string, string>[]> {
   return new Promise((resolve, reject) => {
     Papa.parse<Record<string, string>>(file, {

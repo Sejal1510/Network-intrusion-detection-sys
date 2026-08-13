@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { getCurrentUser, login as loginRequest, logout as logoutRequest } from "@/api/endpoints/auth"
-import { ApiError, setSessionToken } from "@/api/client"
+import { ApiError, setSessionToken, setUnauthorizedHandler } from "@/api/client"
 import type { UserRole } from "@/api/types"
 
 const STORAGE_KEY = "nids_session_token"
@@ -28,12 +29,28 @@ export interface UserAuthState {
  * dashboard's own device identity for /ws/live.
  */
 export function useUserAuth(): UserAuthState {
+  const queryClient = useQueryClient()
   const [token, setToken] = useState<string | null>(() =>
     typeof window === "undefined" ? null : window.localStorage.getItem(STORAGE_KEY)
   )
   const [user, setUser] = useState<CurrentUser | null>(null)
   const [status, setStatus] = useState<UserAuthStatus>(token ? "loading" : "anonymous")
   const [error, setError] = useState<string | null>(null)
+
+  // Shared by rehydration-failure, a mid-session 401, and manual logout --
+  // all three mean "this browser no longer has a valid session," so all
+  // three must leave state identically clean. Also clears the query cache
+  // so a different user logging in on the same tab never sees a flash of
+  // the previous user's cached alerts/history/devices before fresh
+  // queries land.
+  const clearLocalSession = useCallback(() => {
+    window.localStorage.removeItem(STORAGE_KEY)
+    setSessionToken(null)
+    setToken(null)
+    setUser(null)
+    setStatus("anonymous")
+    queryClient.clear()
+  }, [queryClient])
 
   // Rehydrate on mount if a token is stored -- verify it's still valid
   // via GET /auth/me rather than trusting localStorage blindly (the
@@ -46,14 +63,19 @@ export function useUserAuth(): UserAuthState {
         setUser({ username: me.username, role: me.role })
         setStatus("authenticated")
       })
-      .catch(() => {
-        window.localStorage.removeItem(STORAGE_KEY)
-        setSessionToken(null)
-        setToken(null)
-        setStatus("anonymous")
-      })
+      .catch(clearLocalSession)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // A request that carried a (previously valid) session token came back
+  // 401 -- the session expired or was revoked server-side mid-use.
+  // client.ts owns detecting this; this just reacts to it, the same way
+  // RequireAuth already reacts to `status` turning "anonymous" by
+  // redirecting to /login (no changes needed there).
+  useEffect(() => {
+    setUnauthorizedHandler(clearLocalSession)
+    return () => setUnauthorizedHandler(null)
+  }, [clearLocalSession])
 
   const login = useCallback(async (username: string, password: string): Promise<void> => {
     setStatus("loading")
@@ -82,12 +104,8 @@ export function useUserAuth(): UserAuthState {
     } catch {
       // best-effort -- the session is cleared client-side regardless
     }
-    window.localStorage.removeItem(STORAGE_KEY)
-    setSessionToken(null)
-    setToken(null)
-    setUser(null)
-    setStatus("anonymous")
-  }, [])
+    clearLocalSession()
+  }, [clearLocalSession])
 
   return { status, user, token, error, login, logout }
 }
