@@ -2,10 +2,8 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { http, HttpResponse } from "msw"
 import { server } from "@/test/mocks/server"
-import { DeviceAuthProvider } from "@/context/DeviceAuthProvider"
 import { useLiveFeed } from "./useLiveFeed"
 import type { PredictResponse } from "@/api/types"
-import type { ReactNode } from "react"
 
 const BASE = "http://localhost:8000"
 
@@ -32,10 +30,6 @@ class FakeWebSocket {
   send() {}
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-  return <DeviceAuthProvider>{children}</DeviceAuthProvider>
-}
-
 function makeResponse(overrides: Partial<PredictResponse> = {}): PredictResponse {
   return {
     prediction: "dos",
@@ -54,10 +48,12 @@ function makeResponse(overrides: Partial<PredictResponse> = {}): PredictResponse
 }
 
 beforeEach(() => {
-  window.localStorage.setItem("nids_device_token", "test-token")
   FakeWebSocket.instances = []
   vi.stubGlobal("WebSocket", FakeWebSocket)
   server.use(
+    http.post(`${BASE}/auth/ws-ticket`, () =>
+      HttpResponse.json({ ticket: "test-ticket", expires_in_seconds: 60 })
+    ),
     http.get(`${BASE}/history/predictions`, () =>
       HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 })
     )
@@ -71,7 +67,7 @@ afterEach(() => {
 
 describe("useLiveFeed", () => {
   it("connects and moves to live on open", async () => {
-    const { result } = renderHook(() => useLiveFeed(), { wrapper })
+    const { result } = renderHook(() => useLiveFeed())
 
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     expect(result.current.status).toBe("connecting")
@@ -81,8 +77,17 @@ describe("useLiveFeed", () => {
     expect(result.current.status).toBe("live")
   })
 
+  it("goes offline without ever opening a socket if minting a ws-ticket fails", async () => {
+    server.use(http.post(`${BASE}/auth/ws-ticket`, () => HttpResponse.json({ detail: "Not authenticated." }, { status: 401 })))
+
+    const { result } = renderHook(() => useLiveFeed())
+
+    await waitFor(() => expect(result.current.status).toBe("offline"))
+    expect(FakeWebSocket.instances).toHaveLength(0)
+  })
+
   it("buffers incoming messages newest-first", async () => {
-    const { result } = renderHook(() => useLiveFeed(), { wrapper })
+    const { result } = renderHook(() => useLiveFeed())
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const socket = FakeWebSocket.instances[0]
     act(() => socket.onopen?.())
@@ -98,7 +103,7 @@ describe("useLiveFeed", () => {
   })
 
   it("dedupes messages that share the same alert_id", async () => {
-    const { result } = renderHook(() => useLiveFeed(), { wrapper })
+    const { result } = renderHook(() => useLiveFeed())
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const socket = FakeWebSocket.instances[0]
     act(() => socket.onopen?.())
@@ -113,7 +118,7 @@ describe("useLiveFeed", () => {
   })
 
   it("caps the buffer at 500 entries, dropping the oldest", async () => {
-    const { result } = renderHook(() => useLiveFeed(), { wrapper })
+    const { result } = renderHook(() => useLiveFeed())
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const socket = FakeWebSocket.instances[0]
     act(() => socket.onopen?.())
@@ -163,7 +168,7 @@ describe("useLiveFeed", () => {
       )
     )
 
-    const { result } = renderHook(() => useLiveFeed(), { wrapper })
+    const { result } = renderHook(() => useLiveFeed())
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const first = FakeWebSocket.instances[0]
     act(() => first.onopen?.())

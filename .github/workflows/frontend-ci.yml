@@ -38,3 +38,6 @@ jobs:
 
       - name: Build (tsc + vite)
         run: npm run build
+
+      - name: Dependency vulnerability scan (npm audit)
+        run: npm audit --omit=dev

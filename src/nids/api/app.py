@@ -78,6 +78,7 @@ from nids.api.schemas import (
     RuleResponse,
     ServedRunInfo,
 )
+from nids.api.security_headers import SecurityHeadersMiddleware
 from nids.api.store import create_db_engine
 from nids.api.worker import run_worker
 
@@ -409,10 +410,12 @@ def create_app(config: ServingConfig) -> FastAPI:
     app = FastAPI(title="NIDS Inference API", lifespan=_lifespan)
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(PrometheusMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     if config.cors_origins:
-        # allow_credentials stays off: the dashboard authenticates via a
-        # ?token= query param (see nids.api.broadcast), never cookies, so
-        # there's no session state that needs credentialed CORS.
+        # allow_credentials stays off: every authenticated request (REST
+        # bearer header, or /ws/live's ?ticket=, see nids.api.broadcast)
+        # is attached explicitly by client code, never a cookie, so
+        # there's no ambient session state that needs credentialed CORS.
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(config.cors_origins),

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy.engine import Engine
 
 from nids.api.store import (
@@ -35,6 +36,9 @@ from nids.api.store import (
 )
 
 VALID_ROLES = ("analyst", "admin")
+
+_WS_TICKET_SALT = "nids-ws-ticket"
+DEFAULT_WS_TICKET_TTL_SECONDS = 60
 
 
 def hash_password(raw: str) -> str:
@@ -100,3 +104,37 @@ def authenticate_session(engine: Engine, token: str) -> UserRecordView | None:
 
 def revoke_session(engine: Engine, token: str) -> None:
     revoke_session_by_token_hash(engine, _hash_token(token))
+
+
+def issue_ws_ticket(secret_key: str, user_id: str) -> str:
+    """A short-lived, stateless ticket that stands in for a session token
+    on `/ws/live`'s WebSocket handshake (`nids.api.broadcast`). Browsers
+    can't attach the `Authorization` header REST calls use to a WebSocket
+    upgrade, and the only alternative -- the connection URL -- ends up in
+    proxy/access logs; putting the real, hours-long session token there
+    would leave it exposed for its full lifetime. A ticket carries only a
+    user id and expires in `DEFAULT_WS_TICKET_TTL_SECONDS`, minted fresh
+    immediately before every connect/reconnect, so whatever lands in a
+    log is stale within about a minute. Mirrors `nids.api.agent_auth`'s
+    pairing token exactly (`itsdangerous`, stateless, no database row) --
+    a different salt keeps the two token types from being interchangeable
+    even though they may share the same `secret_key`."""
+    serializer = URLSafeTimedSerializer(secret_key, salt=_WS_TICKET_SALT)
+    return serializer.dumps({"user_id": user_id})
+
+
+def verify_ws_ticket(
+    token: str, secret_key: str, ttl_seconds: int = DEFAULT_WS_TICKET_TTL_SECONDS
+) -> str | None:
+    """The user id embedded in a valid, unexpired ticket; `None` (never
+    raises) for a malformed, forged, or expired one -- an invalid ticket
+    is an expected outcome (the client reconnected too slowly, or the
+    server restarted with a new generated `secret_key`), not an
+    exceptional program state."""
+    serializer = URLSafeTimedSerializer(secret_key, salt=_WS_TICKET_SALT)
+    try:
+        payload = serializer.loads(token, max_age=ttl_seconds)
+    except (BadSignature, SignatureExpired):
+        return None
+    user_id = payload.get("user_id")
+    return user_id if isinstance(user_id, str) else None

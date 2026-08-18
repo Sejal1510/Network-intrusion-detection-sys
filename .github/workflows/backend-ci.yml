@@ -36,3 +36,24 @@ jobs:
 
       - name: Test (pytest)
         run: pytest -q
+
+      # --ignore-vuln entries below are pre-existing findings, all
+      # transitive through mlflow-skinny (gitpython/sqlparse) or its own
+      # deps (cryptography) -- none reachable from this app's own code
+      # (mlflow's git/SQL-parsing internals aren't exercised on any path
+      # this API serves). Triaged 2026-08-18; re-check on the next mlflow
+      # bump rather than blindly carrying this list forward. Any *new*
+      # finding not on this list still fails the build.
+      - name: Dependency vulnerability scan (pip-audit)
+        run: |
+          pip-audit \
+            --ignore-vuln PYSEC-2026-3552 \
+            --ignore-vuln GHSA-9rj7-rf2p-w77r \
+            --ignore-vuln GHSA-4gmw-gg2m-w46p \
+            --ignore-vuln GHSA-hh9p-6wh2-4mfc \
+            --ignore-vuln GHSA-wvpp-8hx9-p66j \
+            --ignore-vuln GHSA-jm78-9fvv-mhgr \
+            --ignore-vuln CVE-2026-71491 \
+            --ignore-vuln CVE-2026-59894 \
+            --ignore-vuln CVE-2026-59893 \
+            --ignore-vuln CVE-2026-54284

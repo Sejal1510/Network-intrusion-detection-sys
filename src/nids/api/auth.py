@@ -27,12 +27,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from nids.api.config import ServingConfig
-from nids.api.schemas import CurrentUserResponse, LoginRequest, LoginResponse
+from nids.api.schemas import CurrentUserResponse, LoginRequest, LoginResponse, WsTicketResponse
 from nids.api.store import UserRecordView, record_audit_event
 from nids.api.user_auth import (
+    DEFAULT_WS_TICKET_TTL_SECONDS,
     authenticate_session,
     authenticate_user,
     create_session,
+    issue_ws_ticket,
     revoke_session,
 )
 
@@ -132,3 +134,13 @@ def logout(request: Request, current_user: CurrentUserDep) -> None:
 @router.get("/me", response_model=CurrentUserResponse)
 def me(current_user: CurrentUserDep) -> CurrentUserResponse:
     return CurrentUserResponse(username=current_user.username, role=current_user.role)
+
+
+@router.post("/ws-ticket", response_model=WsTicketResponse)
+def ws_ticket(request: Request, current_user: CurrentUserDep) -> WsTicketResponse:
+    """Mints a short-lived ticket `GET /ws/live` (`nids.api.broadcast`)
+    accepts in place of a session token -- login-gated exactly like every
+    other route `CurrentUserDep` guards, so a dead/revoked session can't
+    mint a fresh one. See `nids.api.user_auth.issue_ws_ticket`."""
+    ticket = issue_ws_ticket(request.app.state.secret_key, current_user.id)
+    return WsTicketResponse(ticket=ticket, expires_in_seconds=DEFAULT_WS_TICKET_TTL_SECONDS)

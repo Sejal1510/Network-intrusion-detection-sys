@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from nids.api import store
@@ -7,10 +9,14 @@ from nids.api.user_auth import (
     authenticate_user,
     create_session,
     hash_password,
+    issue_ws_ticket,
     register_user,
     revoke_session,
     verify_password,
+    verify_ws_ticket,
 )
+
+SECRET = "test-secret"
 
 
 @pytest.fixture
@@ -121,3 +127,33 @@ def test_create_session_never_stores_the_raw_token(engine):
     session = create_session(engine, user.id, ttl_seconds=3600)
 
     assert store.get_session_by_token_hash(engine, session.token) is None
+
+
+def test_issued_ws_ticket_verifies_to_the_same_user_id():
+    ticket = issue_ws_ticket(SECRET, "user-123")
+    assert verify_ws_ticket(ticket, SECRET) == "user-123"
+
+
+def test_ws_ticket_rejects_wrong_secret():
+    ticket = issue_ws_ticket(SECRET, "user-123")
+    assert verify_ws_ticket(ticket, "a-different-secret") is None
+
+
+def test_ws_ticket_rejects_malformed_ticket():
+    assert verify_ws_ticket("not-a-real-ticket", SECRET) is None
+
+
+def test_ws_ticket_expires_after_ttl():
+    ticket = issue_ws_ticket(SECRET, "user-123")
+    time.sleep(2.1)  # itsdangerous's age check is second-granular; comfortably past ttl_seconds=1
+    assert verify_ws_ticket(ticket, SECRET, ttl_seconds=1) is None
+
+
+def test_ws_ticket_is_not_interchangeable_with_a_pairing_token():
+    """Different salts (see nids.api.user_auth.issue_ws_ticket's
+    docstring) -- a pairing token forged/reused as a ws-ticket, or vice
+    versa, must not verify even with the same secret_key."""
+    from nids.api.agent_auth import issue_pairing_token
+
+    pairing_token = issue_pairing_token(SECRET)
+    assert verify_ws_ticket(pairing_token, SECRET) is None

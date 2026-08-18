@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import { apiWebSocketUrl } from "@/api/client"
+import { requestWsTicket } from "@/api/endpoints/auth"
 import { listPredictions } from "@/api/endpoints/history"
 import type { LiveFeedMessage, MitreMapping, PredictResponse, Severity } from "@/api/types"
-import { useDeviceAuthContext } from "@/context/DeviceAuthProvider"
 import type { ConnectionStatus } from "@/components/layout/ConnectionStatusIndicator"
 
 export interface LiveFeedEntry {
@@ -48,9 +48,15 @@ export interface UseLiveFeedResult {
  * backoff+jitter (mirroring src/nids/agent/client.py's AgentClient), and
  * backfills the gap via GET /history/predictions on every reconnect since
  * /ws/live is Pub/Sub-only with no replay (see docs/LIVE_MONITORING.md).
+ *
+ * Auth: mints a fresh, ~60s-lived ws-ticket (POST /auth/ws-ticket, needs
+ * the caller's own dashboard login) immediately before every connect and
+ * reconnect, rather than pairing as an anonymous device the way this hook
+ * used to (see docs/AUTH.md) -- a dead session simply fails to mint a new
+ * ticket, so a logged-out/expired user's reconnect attempts fail closed
+ * instead of silently continuing to stream.
  */
 export function useLiveFeed(): UseLiveFeedResult {
-  const { ensurePaired } = useDeviceAuthContext()
   const [status, setStatus] = useState<ConnectionStatus>("connecting")
   const [entries, setEntries] = useState<LiveFeedEntry[]>([])
 
@@ -100,16 +106,16 @@ export function useLiveFeed(): UseLiveFeedResult {
       if (closedByUsRef.current) return
       setStatus(hasConnectedBeforeRef.current ? "reconnecting" : "connecting")
 
-      let token: string
+      let ticket: string
       try {
-        token = await ensurePaired()
+        ;({ ticket } = await requestWsTicket())
       } catch {
         setStatus("offline")
         return
       }
       if (closedByUsRef.current) return
 
-      const socket = new WebSocket(apiWebSocketUrl(`/ws/live?token=${encodeURIComponent(token)}`))
+      const socket = new WebSocket(apiWebSocketUrl(`/ws/live?ticket=${encodeURIComponent(ticket)}`))
       socketRef.current = socket
 
       socket.onopen = () => {
@@ -148,7 +154,7 @@ export function useLiveFeed(): UseLiveFeedResult {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
       socketRef.current?.close()
     }
-  }, [ensurePaired])
+  }, [])
 
   return { status, entries }
 }

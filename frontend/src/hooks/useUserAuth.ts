@@ -23,10 +23,12 @@ export interface UserAuthState {
 }
 
 /**
- * Real login for the dashboard (see docs/AUTH.md), independent of and
- * parallel to useDeviceAuth's anonymous device pairing -- a browser
- * operator proving who they are is a different concern from the
- * dashboard's own device identity for /ws/live.
+ * Real login for the dashboard (see docs/AUTH.md). Also the identity
+ * behind /ws/live: useLiveFeed mints a short-lived ws-ticket from this
+ * same session immediately before every connect, so logging out (status
+ * turning "anonymous" here) redirects away from any page holding a live
+ * connection via RequireAuth, which unmounts it and closes the socket --
+ * no separate teardown needed here.
  */
 export function useUserAuth(): UserAuthState {
   const queryClient = useQueryClient()

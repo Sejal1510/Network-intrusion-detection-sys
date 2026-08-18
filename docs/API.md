@@ -362,9 +362,11 @@ Enable it with a repeatable `--cors-origin` flag:
 python -m nids.api --run-id <run_id> --cors-origin http://localhost:5173
 ```
 
-`allow_credentials` stays off regardless — the dashboard authenticates
-via a `?token=` query parameter (see `/ws/live` below), never cookies, so
-there's no session state that needs credentialed CORS.
+`allow_credentials` stays off regardless — every authenticated request
+(REST or `/ws/live`) carries an explicit bearer token/ticket the client
+attaches itself, never a cookie, so there's no ambient session state that
+needs credentialed CORS. Full session/CSP model in
+[`docs/AUTH.md`](AUTH.md).
 
 ## Status codes
 

@@ -19,8 +19,9 @@ opt-in, `GET /mitre`, `HealthResponse.database_configured` — see
 Browser (frontend/, Vite dev server or static build)
    |
    |  REST: /health /model /mitre /predict /predict/batch
-   |        /history/predictions /history/alerts /agent/pair*
-   |  WS:   /ws/live?token=<device-token>
+   |        /history/predictions /history/alerts
+   |        /auth/login /auth/logout /auth/me /auth/ws-ticket
+   |  WS:   /ws/live?ticket=<short-lived ws-ticket, see docs/AUTH.md>
    v
 FastAPI (nids/api/, unchanged shape -- see docs/API.md)
 ```
@@ -35,9 +36,8 @@ are different origins, so the server must be started with
 | `frontend/src/api/types.ts` | Hand-written TS mirrors of `nids/api/schemas.py`, field-for-field |
 | `frontend/src/api/client.ts` | `fetch` wrapper: base URL, JSON/FormData handling, `ApiError` |
 | `frontend/src/api/endpoints/*.ts` | One thin function per backend route |
-| `frontend/src/hooks/useLiveFeed.ts` | Owns the `/ws/live` WebSocket: reconnect + backoff, REST backfill |
-| `frontend/src/hooks/useDeviceAuth.ts` | Lazy device pairing, token persisted in `localStorage` |
-| `frontend/src/context/DeviceAuthProvider.tsx` | The one piece of app-wide client state (the device token) |
+| `frontend/src/hooks/useLiveFeed.ts` | Owns the `/ws/live` WebSocket: mints a fresh ws-ticket per (re)connect, reconnect + backoff, REST backfill |
+| `frontend/src/hooks/useUserAuth.ts` / `context/UserAuthProvider.tsx` | Dashboard login session -- also the identity behind `/ws/live` (see "Auth model") |
 | `frontend/src/routes/*.tsx` | The five pages — see "Pages" below |
 
 State management: TanStack Query owns every piece of server state
@@ -46,21 +46,32 @@ State management: TanStack Query owns every piece of server state
 
 ## Auth model
 
-There is no real user-login system anywhere in this backend (see
-`docs/LIVE_MONITORING.md`'s own note on `/ws/live`'s auth, which this
-reuses verbatim). The dashboard stands in with the same agent-pairing
-flow a capture agent uses: on first visit to a page that needs it (Live
-Feed, Alerts, or History), `useDeviceAuth` calls `POST /agent/pair` then
-`POST /agent/pair/exchange` with `device_name: "dashboard-web"`, and
-persists the returned bearer token in `localStorage`. That token becomes
-the `?token=` on `/ws/live`. Pairing is **lazy, not eager** — Manual
-Predict and CSV Upload never trigger it, and a browser tab that only
-visits those two pages never creates a `devices` row. This is a
-pragmatic stand-in, not multi-user auth: every browser instance that
-does visit a data page becomes its own unauthenticated "device," with no
-cap and no revocation UI. Fixing that for real needs actual per-user
-accounts, which don't exist in this backend today (see `docs/API.md`'s
-"Future endpoints" — "Multi-user deployments").
+Full design (session model, CORS, CSP) lives in
+[`docs/AUTH.md`](AUTH.md); the short version for how the dashboard uses
+it: every page except Login sits behind `RequireAuth`, which redirects
+to `/login` until `POST /auth/login` succeeds and persists a session
+token (`localStorage`, `nids_session_token`). That same token is
+attached as `Authorization: Bearer <token>` to every REST call
+(`api/client.ts`).
+
+`/ws/live` is the one exception a plain `Authorization` header can't
+reach — browsers don't let `WebSocket` set custom handshake headers.
+Rather than fall back to a separate, longer-lived credential (device
+pairing used to fill this gap, before real dashboard login existed),
+`useLiveFeed` mints a short-lived **ws-ticket** (`POST /auth/ws-ticket`,
+itself login-gated) immediately before every connect and reconnect, and
+passes *that* as `/ws/live?ticket=`. The ticket expires in ~60 seconds
+and carries only a user id — so a dead session simply fails to mint a
+new one (reconnect attempts fail closed), and whatever lands in a proxy
+access log is stale within about a minute. Logging out doesn't need to
+explicitly tear down an open live socket either: `status` flipping to
+`"anonymous"` makes `RequireAuth` redirect immediately, which unmounts
+whatever page held the connection and runs `useLiveFeed`'s cleanup.
+
+Device credentials (`POST /agent/pair` / `/agent/pair/exchange`) still
+exist and are unrelated to any of this — they authenticate the actual
+live-capture agent (`nids.agent`, a separate process, possibly on a
+different machine) against `/agent/ingest`, never the dashboard.
 
 ## Degraded mode
 
@@ -136,24 +147,23 @@ separate `python -m nids.agent` process):
 ## Why not alternatives
 
 - **No Redux/Zustand.** TanStack Query already owns all server state;
-  the only genuinely global client state is the device token, which is
-  one small React Context (`DeviceAuthProvider`), not a state library.
+  the only genuinely global client state is the login session, which is
+  one small React Context (`UserAuthProvider`), not a state library.
 - **No `socket.io-client`.** `/ws/live` is a plain FastAPI `WebSocket`,
   not a Socket.IO server — a Socket.IO client would speak the wrong
   protocol entirely. `useLiveFeed` wraps the native `WebSocket` API
   instead, mirroring `src/nids/agent/client.py`'s `AgentClient` reconnect
   philosophy (exponential backoff + jitter) in the frontend's own
   language.
-- **Eager pairing on app mount, rejected.** `POST /agent/pair` /
-  `/agent/pair/exchange` are now rate-limited per client IP (Milestone 10
-  — see [`docs/OBSERVABILITY.md`](OBSERVABILITY.md#rate-limiting)) but
-  still have no auth by design (see "Auth model" above) — a device has
-  nothing to authenticate with before pairing succeeds. Pairing on every
-  mount would still create a `devices` row for every browser tab that
-  ever opens the app, including ones that only ever use Manual Predict,
-  and would burn through the rate limit faster than necessary. Lazy
-  pairing — only when a data page is actually visited — is the smaller
-  footprint for the same capability.
+- **A short-lived ws-ticket over reusing the session token directly,
+  rejected.** The obvious simplest option for `/ws/live` was putting the
+  real session token straight on the URL as `?token=`. Rejected because
+  anything on a URL can end up in proxy/access logs for as long as that
+  token stays valid — for an 8-hour session token, that's a real window.
+  A ~60-second, single-purpose ticket (see "Auth model") gets the same
+  practical effect (this handshake is authenticated as a real, currently
+  logged-in user) while bounding how long a logged value stays useful.
+  Full rationale in [`docs/AUTH.md`](AUTH.md).
 - **Client-side CSV zip over a new backend field.** See the CSV Upload
   design note above.
 

@@ -199,6 +199,11 @@ class CurrentUserResponse(BaseModel):
     role: str
 
 
+class WsTicketResponse(BaseModel):
+    ticket: str
+    expires_in_seconds: int
+
+
 class DeviceListItem(BaseModel):
     id: str
     name: str

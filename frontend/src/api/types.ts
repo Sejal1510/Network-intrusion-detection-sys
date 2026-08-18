@@ -160,6 +160,11 @@ export interface CurrentUserResponse {
   role: UserRole
 }
 
+export interface WsTicketResponse {
+  ticket: string
+  expires_in_seconds: number
+}
+
 export interface DeviceListItem {
   id: string
   name: string

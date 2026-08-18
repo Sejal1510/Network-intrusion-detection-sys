@@ -1,0 +1,41 @@
+# Templated (not a plain nginx.conf) so the CSP's connect-src can name the
+# actual backend origin -- nginx's official image runs envsubst over any
+# *.template file under /etc/nginx/templates/ at container start
+# (docker-entrypoint.d/20-envsubst-on-templates.sh, built in, no extra
+# tooling), substituting only tokens that match a real environment
+# variable name. nginx's own request variables ($uri, $host, ...) below
+# are untouched by that substitution -- they're not env vars -- so this
+# stays safe to template even though it also uses `$uri`.
+#
+# BACKEND_HTTP_ORIGIN/BACKEND_WS_ORIGIN are set by docker-compose.yml,
+# mirroring VITE_API_BASE_URL (see frontend/Dockerfile) so the CSP always
+# points at the same backend the JS bundle itself was built to call --
+# see docs/AUTH.md for the full auth/CORS/CSP model this implements.
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Defense-in-depth on every response, not just index.html -- `always`
+    # so these still attach to non-2xx responses (e.g. nginx's own 404).
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # script-src has no 'unsafe-inline': the one script this SPA needs
+    # before first paint is public/theme-init.js, a same-origin file, not
+    # an inline <script> (see index.html). style-src stays permissive
+    # (React/Recharts both set inline style="..." attributes at runtime,
+    # and inline *style* injection is a far narrower attack surface than
+    # inline *script* injection) -- a deliberate, documented tradeoff, not
+    # an oversight; see docs/AUTH.md.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${BACKEND_HTTP_ORIGIN} ${BACKEND_WS_ORIGIN}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+
+    # react-router-dom's BrowserRouter needs every unknown path to fall
+    # back to index.html (client-side routing decides what to render) --
+    # without this, refreshing on e.g. /alerts 404s at the server.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

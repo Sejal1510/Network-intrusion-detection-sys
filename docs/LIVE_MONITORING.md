@@ -31,19 +31,23 @@ AgentClient                                       v  nids.api.worker
                                                   broadcast every result
 ```
 
-Two WebSocket endpoints, two different auth mechanisms, for a reason
-documented at each:
+Two WebSocket endpoints, two genuinely different identities, each
+authenticated the way its client actually can be:
 
 - **`/agent/ingest`** (`nids.api.ingest`) — the agent is a Python client,
   not a browser, so it authenticates with a proper
-  `Authorization: Bearer <device-token>` handshake header.
+  `Authorization: Bearer <device-token>` handshake header, checked
+  against `nids.api.agent_auth.authenticate_device`. This is the *device*
+  identity described in "Pairing" below.
 - **`/ws/live`** (`nids.api.broadcast`) — a browser dashboard can't set
   custom handshake headers on a WebSocket, so it authenticates via a
-  `?token=` query parameter instead, the standard pragmatic pattern for
-  browser-facing WebSocket auth. Both reuse the same device-credential
-  check (`nids.api.agent_auth.authenticate_device`) — a pragmatic
-  stand-in gate, not real multi-user session auth (still a later,
-  separate concern — see `docs/API.md`'s "Future endpoints").
+  `?ticket=` query parameter instead: a short-lived (~60s), stateless
+  ticket minted by `POST /auth/ws-ticket`, which requires a real,
+  currently logged-in dashboard session. This is the dashboard *user*
+  identity (`nids.api.user_auth`), not the device identity above — the
+  two are unrelated and never interchangeable (confirmed by
+  `test_live_rejects_a_device_credential` in `tests/test_api_broadcast.py`).
+  Full rationale for the ticket design in [`docs/AUTH.md`](AUTH.md).
 
 ## Pairing: two credentials, two lifetimes
 
@@ -155,8 +159,8 @@ flow from one device must not stop monitoring for every device.
 
 ```bash
 # 1. Start the server (add --database-url to persist agent predictions/alerts
-#    like any other source; the WS routes need one, since device auth reads
-#    it -- see nids.api.agent_auth)
+#    like any other source; both WS routes need one -- device auth
+#    (agent_auth) and dashboard sessions/ws-tickets (user_auth) both read it)
 python -m nids.api --run-id <run_id> --database-url sqlite:///history.db
 
 # 2. Issue a pairing code (stands in for a future dashboard "add device" button)
@@ -174,13 +178,30 @@ python -m nids.agent run --base-url http://localhost:8000 \
     --pcap path/to/capture.pcap --speed 1000
 ```
 
-Watch the results arrive by connecting to `/ws/live?token=<device-token>`
-with any WebSocket client — each message is
-`{"type": "prediction", "data": <the same shape /predict returns>}`.
-This exact sequence (steps 1–4b, replaying
-`tests/fixtures/sample_capture.pcap`) was used to manually verify the full
-pipeline end-to-end: agent -> ingest -> `"flows"` -> worker -> pipeline ->
-`"live"` -> broadcast, confirming real predictions arrive on `/ws/live`.
+Watch the results arrive over `/ws/live` -- unlike the agent side, this
+needs a *dashboard* identity (see [`docs/AUTH.md`](AUTH.md)), not a
+device credential:
+
+```bash
+# Once, to have a dashboard user at all
+python -m nids.api.users create-user --username demo --password demo \
+    --role analyst --database-url sqlite:///history.db
+
+# Log in, mint a ws-ticket, then connect within ~60s of minting it
+token=$(curl -s -X POST http://localhost:8000/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"demo","password":"demo"}' | jq -r .token)
+ticket=$(curl -s -X POST http://localhost:8000/auth/ws-ticket \
+    -H "Authorization: Bearer $token" | jq -r .ticket)
+# then connect any WebSocket client to /ws/live?ticket=$ticket
+```
+
+Each message is `{"type": "prediction", "data": <the same shape /predict
+returns>}`. This exact sequence (agent steps 1–4b, replaying
+`tests/fixtures/sample_capture.pcap`, dashboard side via a real login +
+ws-ticket) was used to manually verify the full pipeline end-to-end:
+agent -> ingest -> `"flows"` -> worker -> pipeline -> `"live"` ->
+broadcast, confirming real predictions arrive on `/ws/live`.
 
 ## Testing
 
@@ -199,5 +220,6 @@ already established for `Classifier`/`MessageBus`/etc.:
   and source selection, with `AgentClient`/`asyncio.run` stubbed out so
   tests don't actually open a socket or run forever.
 - `tests/test_api_agent_auth.py`, `tests/test_api_ingest.py`,
-  `tests/test_api_broadcast.py` — pairing, device auth, and both WebSocket
-  routes against FastAPI's `TestClient`.
+  `tests/test_api_broadcast.py` — device pairing/auth, dashboard
+  session/ws-ticket auth, and both WebSocket routes against FastAPI's
+  `TestClient` -- including that each rejects the other's credential type.

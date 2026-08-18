@@ -125,3 +125,41 @@ def test_logout_requires_authentication(app_with_db):
     response = client.post("/auth/logout")
 
     assert response.status_code == 401
+
+
+def test_ws_ticket_succeeds_for_a_logged_in_user(app_with_db, analyst_user):
+    client = TestClient(app_with_db)
+    token = client.post(
+        "/auth/login", json={"username": "analyst1", "password": "hunter2"}
+    ).json()["token"]
+
+    response = client.post("/auth/ws-ticket", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ticket"]
+    assert body["expires_in_seconds"] > 0
+
+
+def test_ws_ticket_requires_authentication(app_with_db):
+    client = TestClient(app_with_db)
+
+    response = client.post("/auth/ws-ticket")
+
+    assert response.status_code == 401
+
+
+def test_ws_ticket_is_unusable_after_logout(app_with_db, analyst_user):
+    """A revoked session can't mint a fresh ticket -- the whole point of
+    tying /ws/live's auth to real sessions instead of a non-expiring
+    device credential (see nids.api.broadcast's module docstring)."""
+    client = TestClient(app_with_db)
+    token = client.post(
+        "/auth/login", json={"username": "analyst1", "password": "hunter2"}
+    ).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    client.post("/auth/logout", headers=headers)
+
+    response = client.post("/auth/ws-ticket", headers=headers)
+
+    assert response.status_code == 401

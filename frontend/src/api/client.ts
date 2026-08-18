@@ -4,9 +4,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000
 // UserAuthProvider on login/logout. A module-level value, not a token
 // threaded through every endpoint function: there is exactly one such
 // value per browser tab, so this is the honest shape, not an
-// abstraction leak. Distinct from the device token (useDeviceAuth),
-// which is only ever sent as a WebSocket ?token= query param, never a
-// REST header.
+// abstraction leak. /ws/live (useLiveFeed) authenticates with this same
+// session -- via a short-lived ws-ticket minted through the normal
+// Authorization header below, not this token directly, since a
+// WebSocket handshake can't carry a header a browser sets itself.
 let currentSessionToken: string | null = null
 
 export function setSessionToken(token: string | null): void {
