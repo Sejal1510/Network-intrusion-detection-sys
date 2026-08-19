@@ -152,6 +152,30 @@ class AlertHistoryResponse(BaseModel):
     offset: int
 
 
+class EnrichmentResultResponse(BaseModel):
+    """One provider's cached verdict for one indicator on a specific
+    prediction/alert (`nids.api.threat_intel`, `GET /history/predictions/
+    {id}/enrichment`). `indicator_role` ("src"/"dst") is resolved against
+    *this* prediction's own `src_ip`/`dst_ip` at request time -- the
+    underlying cache row (`nids.api.store.IocEnrichmentRecord`) is shared
+    across every prediction that ever referenced this indicator and has
+    no concept of "role" itself, since the same IP can be the source in
+    one flow and the destination in another."""
+
+    indicator: str
+    indicator_role: str
+    provider: str
+    verdict: str
+    confidence: float
+    raw_response: dict[str, Any]
+    looked_up_at: datetime
+    expires_at: datetime
+
+
+class EnrichmentListResponse(BaseModel):
+    items: list[EnrichmentResultResponse]
+
+
 class AuditEventItem(BaseModel):
     id: str
     created_at: datetime

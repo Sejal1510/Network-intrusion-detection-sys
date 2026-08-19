@@ -26,6 +26,9 @@ services:
       NIDS_SMTP_FROM: ${NIDS_SMTP_FROM:-}
       NIDS_SMTP_TO: ${NIDS_SMTP_TO:-}
       NIDS_NOTIFICATION_MIN_SEVERITY: ${NIDS_NOTIFICATION_MIN_SEVERITY:-high}
+      NIDS_ABUSEIPDB_API_KEY: ${NIDS_ABUSEIPDB_API_KEY:-}
+      NIDS_GREYNOISE_API_KEY: ${NIDS_GREYNOISE_API_KEY:-}
+      NIDS_ENRICHMENT_CACHE_TTL_SECONDS: ${NIDS_ENRICHMENT_CACHE_TTL_SECONDS:-86400}
     volumes:
       # Trained runs are produced by `python -m nids.training` on the
       # host (see docs/DATASET.md) and never baked into the image --

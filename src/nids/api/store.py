@@ -20,10 +20,19 @@ from __future__ import annotations
 import dataclasses
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, create_engine, func, select
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    create_engine,
+    func,
+    select,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, joinedload, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -33,6 +42,7 @@ from nids.api.explain import Explanation
 from nids.api.inference import PredictionResult
 from nids.api.mitre import MitreMapping
 from nids.api.risk import RiskScore
+from nids.api.threat_intel import EnrichmentResult
 
 
 def _new_id() -> str:
@@ -66,6 +76,15 @@ class PredictionRecord(Base):
     raw_record: Mapped[dict[str, Any]] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String, default="api")
     device_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Only ever set for source="api" is impossible by construction -- NSL-KDD
+    # (nids.data.schema.FEATURE_COLUMNS) has no IP field at all, so /predict
+    # and /predict/batch never have one to pass. Set for source="agent" when
+    # nids.flows.aggregator.FlowAggregator captured it (see its docstring).
+    # Dedicated columns (not just fields inside raw_record, which also
+    # carries them) so nids.api.threat_intel's enrichment lookup can query
+    # by IP without parsing the JSON blob.
+    src_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    dst_ip: Mapped[str | None] = mapped_column(String, nullable=True)
 
     explanation: Mapped[ExplanationRecord | None] = relationship(
         back_populates="prediction", uselist=False, cascade="all, delete-orphan"
@@ -147,6 +166,31 @@ class AuditEventRecord(Base):
     detail: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
+class IocEnrichmentRecord(Base):
+    """A cached threat-intel verdict for one (indicator, provider) pair
+    (`nids.api.threat_intel`). This table *is* the enrichment cache, not
+    a separate structure alongside it -- unique on (indicator, provider)
+    so the same IP recurring across many predictions/alerts reuses one
+    row instead of accumulating a new one per occurrence, which is the
+    entire point of "prevent repeated external lookups." Deliberately not
+    foreign-keyed to `predictions`/`alerts`: an indicator's reputation is
+    a fact about the IP, not about any one flow that happened to involve
+    it, and a lookup by `GET /history/predictions/{id}/enrichment` reads
+    this table by IP value at request time rather than following a join."""
+
+    __tablename__ = "ioc_enrichments"
+    __table_args__ = (UniqueConstraint("indicator", "provider", name="uq_ioc_enrichment_indicator_provider"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    indicator: Mapped[str] = mapped_column(String)
+    provider: Mapped[str] = mapped_column(String)
+    verdict: Mapped[str] = mapped_column(String)
+    confidence: Mapped[float] = mapped_column(Float)
+    raw_response: Mapped[dict[str, Any]] = mapped_column(JSON)
+    looked_up_at: Mapped[datetime] = mapped_column(DateTime)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class UserRecord(Base):
     """A login identity for the dashboard (see `nids.api.user_auth`).
     Only `password_hash` is ever stored -- never the raw password, same
@@ -221,6 +265,8 @@ class PredictionRecordView:
     raw_record: dict[str, Any]
     source: str
     device_id: str | None
+    src_ip: str | None
+    dst_ip: str | None
     explanation: ExplanationView | None
 
 
@@ -238,6 +284,18 @@ class AlertRecordView:
     acknowledged: bool
     source: str
     device_id: str | None
+
+
+@dataclass(frozen=True)
+class IocEnrichmentView:
+    id: str
+    indicator: str
+    provider: str
+    verdict: str
+    confidence: float
+    raw_response: dict[str, Any]
+    looked_up_at: datetime
+    expires_at: datetime
 
 
 @dataclass(frozen=True)
@@ -320,6 +378,8 @@ def _prediction_to_view(record: PredictionRecord) -> PredictionRecordView:
         raw_record=record.raw_record,
         source=record.source,
         device_id=record.device_id,
+        src_ip=record.src_ip,
+        dst_ip=record.dst_ip,
         explanation=explanation,
     )
 
@@ -422,6 +482,8 @@ def save_prediction(
     explanation: Explanation | None = None,
     source: str = "api",
     device_id: str | None = None,
+    src_ip: str | None = None,
+    dst_ip: str | None = None,
 ) -> str:
     """Persist one prediction (and its explanation, if given). Returns the
     new prediction's id."""
@@ -442,6 +504,8 @@ def save_prediction(
         raw_record=raw_record,
         source=source,
         device_id=device_id,
+        src_ip=src_ip,
+        dst_ip=dst_ip,
     )
     if explanation is not None:
         record.explanation = ExplanationRecord(
@@ -477,6 +541,41 @@ def save_alert(engine: Engine, prediction_id: str, alert: Alert, device_id: str 
         return record.id
 
 
+def upsert_enrichment(engine: Engine, result: EnrichmentResult, ttl_seconds: int) -> None:
+    """Insert a fresh `ioc_enrichments` row for `(result.indicator,
+    result.provider)`, or overwrite the existing one -- callers (see
+    `nids.api.threat_intel.dispatcher`) only ever reach this after already
+    deciding a lookup was needed (no fresh cached row), so "overwrite" is
+    always the right behavior, never "keep the older one."""
+    expires_at = result.looked_up_at + timedelta(seconds=ttl_seconds)
+    with Session(engine) as session:
+        existing = session.scalars(
+            select(IocEnrichmentRecord).where(
+                IocEnrichmentRecord.indicator == result.indicator,
+                IocEnrichmentRecord.provider == result.provider,
+            )
+        ).one_or_none()
+        if existing is not None:
+            existing.verdict = result.verdict
+            existing.confidence = result.confidence
+            existing.raw_response = result.raw_response
+            existing.looked_up_at = result.looked_up_at
+            existing.expires_at = expires_at
+        else:
+            session.add(
+                IocEnrichmentRecord(
+                    indicator=result.indicator,
+                    provider=result.provider,
+                    verdict=result.verdict,
+                    confidence=result.confidence,
+                    raw_response=result.raw_response,
+                    looked_up_at=result.looked_up_at,
+                    expires_at=expires_at,
+                )
+            )
+        session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
@@ -497,6 +596,47 @@ def get_alert(engine: Engine, alert_id: str) -> AlertRecordView | None:
     with Session(engine) as session:
         record = session.get(AlertRecord, alert_id)
         return _alert_to_view(record) if record is not None else None
+
+
+def _enrichment_to_view(record: IocEnrichmentRecord) -> IocEnrichmentView:
+    return IocEnrichmentView(
+        id=record.id,
+        indicator=record.indicator,
+        provider=record.provider,
+        verdict=record.verdict,
+        confidence=record.confidence,
+        raw_response=record.raw_response,
+        looked_up_at=record.looked_up_at,
+        expires_at=record.expires_at,
+    )
+
+
+def get_cached_enrichment(engine: Engine, indicator: str, provider: str) -> IocEnrichmentView | None:
+    """Whatever's cached for `(indicator, provider)`, regardless of
+    whether it's still fresh -- freshness (`expires_at` vs. now) is the
+    caller's decision (see `nids.api.threat_intel.dispatcher`, which
+    skips a re-lookup only when this *is* still fresh)."""
+    with Session(engine) as session:
+        record = session.scalars(
+            select(IocEnrichmentRecord).where(
+                IocEnrichmentRecord.indicator == indicator, IocEnrichmentRecord.provider == provider
+            )
+        ).one_or_none()
+        return _enrichment_to_view(record) if record is not None else None
+
+
+def list_enrichments_for_indicators(engine: Engine, indicators: list[str]) -> list[IocEnrichmentView]:
+    """Every cached provider result (fresh or stale -- see
+    `get_cached_enrichment`'s docstring for why staleness isn't filtered
+    here either) for any of `indicators`. `nids.api.history`'s enrichment
+    routes call this with a prediction's non-null `src_ip`/`dst_ip`."""
+    if not indicators:
+        return []
+    with Session(engine) as session:
+        records = session.scalars(
+            select(IocEnrichmentRecord).where(IocEnrichmentRecord.indicator.in_(indicators))
+        ).all()
+        return [_enrichment_to_view(r) for r in records]
 
 
 def list_predictions(

@@ -80,6 +80,9 @@ from nids.api.schemas import (
 )
 from nids.api.security_headers import SecurityHeadersMiddleware
 from nids.api.store import create_db_engine
+from nids.api.threat_intel import build_providers
+from nids.api.threat_intel.dispatcher import run_enrichment_dispatcher
+from nids.api.threat_intel.publish import schedule_enrichment_publish
 from nids.api.worker import run_worker
 
 logger = logging.getLogger(__name__)
@@ -242,6 +245,18 @@ def _notify(app: FastAPI, alert: Alert) -> None:
     schedule_alert_publish(app.state.bus, loop, alert)
 
 
+def _enrich(app: FastAPI, indicators: list[str]) -> None:
+    """`enrich=` callback passed into `process_record`/`finish_record`
+    (see `nids.api.pipeline`) -- direct sibling of `_notify` above, same
+    reasoning: always wired in (publishing to `"enrichment"` with zero
+    subscribers is a no-op, same as `"notifications"`), same `event_loop`
+    caveat for tests that never ran `_lifespan`."""
+    loop = getattr(app.state, "event_loop", None)
+    if loop is None:
+        return
+    schedule_enrichment_publish(app.state.bus, loop, indicators)
+
+
 _EXPLAIN_QUERY = Query(False, description="Include a SHAP-based explanation of the classifier's prediction.")
 
 
@@ -265,6 +280,7 @@ def predict(
                 db_engine=request.app.state.db_engine,
                 explain=explain,
                 notify=lambda alert: _notify(request.app, alert),
+                enrich=lambda indicators: _enrich(request.app, indicators),
                 metrics=metrics,
             )
     except ValueError as exc:
@@ -330,6 +346,7 @@ async def predict_batch_csv(
             config=config,
             db_engine=db_engine,
             notify=lambda alert: _notify(request.app, alert),
+            enrich=lambda indicators: _enrich(request.app, indicators),
             metrics=metrics,
         )
         responses.append(row_response)
@@ -359,6 +376,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     *both* bus tiers, but only if `app.state.notification_channels` is
     non-empty (see that module's docstring for why in-process is safe
     here unlike the live worker, and its one real limitation).
+
+    Also starts the enrichment dispatcher (`nids.api.threat_intel.
+    dispatcher.run_enrichment_dispatcher`), same in-process-for-both-
+    bus-tiers reasoning as the notification dispatcher, gated on *two*
+    conditions rather than one: `app.state.threat_intel_providers`
+    non-empty *and* `app.state.db_engine` configured -- unlike
+    notifications (which just publish outward), enrichment needs
+    somewhere to write its cache (`nids.api.store.IocEnrichmentRecord`).
     """
     app.state.event_loop = asyncio.get_running_loop()
 
@@ -382,10 +407,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         )
 
+    enrichment_task: asyncio.Task | None = None
+    if app.state.threat_intel_providers and app.state.db_engine is not None:
+        enrichment_task = asyncio.create_task(
+            run_enrichment_dispatcher(
+                app.state.bus,
+                app.state.threat_intel_providers,
+                app.state.serving_config.enrichment_cache_ttl_seconds,
+                app.state.db_engine,
+                app.state.metrics,
+            )
+        )
+
     try:
         yield
     finally:
-        for task in (worker_task, notification_task):
+        for task in (worker_task, notification_task, enrichment_task):
             if task is not None:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -406,6 +443,8 @@ def create_app(config: ServingConfig) -> FastAPI:
     (see `nids.api.notifications`) is an empty list unless
     `slack_webhook_url`/the `smtp_*` fields are set -- `_lifespan` only
     starts the notification dispatcher if it's non-empty.
+    `threat_intel_providers` (see `nids.api.threat_intel`) is likewise
+    empty unless `abuseipdb_api_key`/`greynoise_api_key` are set.
     """
     app = FastAPI(title="NIDS Inference API", lifespan=_lifespan)
     app.add_middleware(RequestLoggingMiddleware)
@@ -429,6 +468,7 @@ def create_app(config: ServingConfig) -> FastAPI:
     app.state.bus = create_bus(config.redis_url)
     app.state.rate_limiter = create_rate_limiter(config.redis_url)
     app.state.notification_channels = build_channels(config)
+    app.state.threat_intel_providers = build_providers(config)
     app.state.secret_key = config.secret_key or secrets.token_urlsafe(32)
     app.include_router(router)
     app.include_router(history_router)

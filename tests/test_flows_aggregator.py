@@ -176,5 +176,7 @@ def test_record_satisfies_the_shared_raw_record_contract():
     agg.process_packet(_pkt(0.0, "10.0.0.1", 5000, "9.9.9.9", 80, flags="S"))
     record = agg.flush_idle(now=3.0)[0]
 
-    assert set(record.keys()) == set(FEATURE_COLUMNS)
-    validate_raw_records(pd.DataFrame([record]))  # must not raise
+    assert set(FEATURE_COLUMNS) <= set(record.keys())
+    assert record["src_ip"] == "10.0.0.1"
+    assert record["dst_ip"] == "9.9.9.9"
+    validate_raw_records(pd.DataFrame([record]))  # must not raise -- extra keys are tolerated

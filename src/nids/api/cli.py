@@ -180,6 +180,25 @@ def main() -> int:
         "(env: NIDS_NOTIFICATION_MIN_SEVERITY, see docs/NOTIFICATIONS.md)",
     )
     parser.add_argument(
+        "--abuseipdb-api-key",
+        default=os.environ.get("NIDS_ABUSEIPDB_API_KEY"),
+        help="AbuseIPDB API key; omitted means that IOC enrichment provider is never "
+        "configured (env: NIDS_ABUSEIPDB_API_KEY, see docs/THREAT_INTEL.md)",
+    )
+    parser.add_argument(
+        "--greynoise-api-key",
+        default=os.environ.get("NIDS_GREYNOISE_API_KEY"),
+        help="GreyNoise API key; omitted means that IOC enrichment provider is never "
+        "configured (env: NIDS_GREYNOISE_API_KEY, see docs/THREAT_INTEL.md)",
+    )
+    parser.add_argument(
+        "--enrichment-cache-ttl-seconds",
+        type=int,
+        default=_env_int("NIDS_ENRICHMENT_CACHE_TTL_SECONDS", 86_400),
+        help="how long a cached IOC enrichment result is trusted before a re-lookup is "
+        "allowed (env: NIDS_ENRICHMENT_CACHE_TTL_SECONDS, default 86400 = 24h)",
+    )
+    parser.add_argument(
         "--log-level",
         default=os.environ.get("NIDS_LOG_LEVEL", "INFO"),
         help="root logger level, e.g. DEBUG/INFO/WARNING (env: NIDS_LOG_LEVEL)",
@@ -225,6 +244,9 @@ def main() -> int:
         smtp_to_addrs=tuple(smtp_to_addrs),
         smtp_use_tls=not args.smtp_no_tls,
         notification_min_severity=args.notification_min_severity,
+        abuseipdb_api_key=args.abuseipdb_api_key,
+        greynoise_api_key=args.greynoise_api_key,
+        enrichment_cache_ttl_seconds=args.enrichment_cache_ttl_seconds,
     )
     app = create_app(config)
 

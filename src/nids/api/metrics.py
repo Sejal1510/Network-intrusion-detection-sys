@@ -42,6 +42,7 @@ class Metrics:
     prediction_duration_seconds: Histogram
     alerts_raised_total: Counter
     notifications_sent_total: Counter
+    ioc_enrichment_lookups_total: Counter
 
 
 def create_metrics() -> Metrics:
@@ -82,6 +83,14 @@ def create_metrics() -> Metrics:
             "Total notification channel send attempts (nids.api.notifications), "
             "labeled by channel class name and outcome.",
             ["channel", "status"],
+            registry=registry,
+        ),
+        ioc_enrichment_lookups_total=Counter(
+            "nids_ioc_enrichment_lookups_total",
+            "Total threat-intel provider lookup attempts (nids.api.threat_intel), "
+            "labeled by provider name and outcome. Cache hits (no external call "
+            "made) are not counted here -- this measures external usage.",
+            ["provider", "status"],
             registry=registry,
         ),
     )

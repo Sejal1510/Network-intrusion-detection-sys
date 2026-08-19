@@ -212,6 +212,23 @@ export interface Rule {
   mitre: MitreMapping | null
 }
 
+export type TiVerdict = "malicious" | "suspicious" | "benign" | "unknown"
+
+export interface EnrichmentResult {
+  indicator: string
+  indicator_role: "src" | "dst"
+  provider: string
+  verdict: TiVerdict
+  confidence: number
+  raw_response: Record<string, unknown>
+  looked_up_at: string
+  expires_at: string
+}
+
+export interface EnrichmentListResponse {
+  items: EnrichmentResult[]
+}
+
 export interface MetricsSummary {
   http_requests_total: number
   alerts_by_source: Record<string, number>

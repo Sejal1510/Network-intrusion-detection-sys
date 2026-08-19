@@ -48,6 +48,7 @@ from nids.api.schemas import (
     RiskScoreResponse,
 )
 from nids.api.store import save_alert, save_prediction
+from nids.api.threat_intel import extract_indicators
 
 # A plain bool (decided upfront, e.g. `/predict`'s `?explain=true`) or a
 # callable that decides given the prediction and its risk score (e.g.
@@ -164,6 +165,12 @@ def persist_if_configured(
         explanation=explanation,
         source=source,
         device_id=device_id,
+        # str(...)-wrapped: raw_record is `dict[str, Any]`, and these two
+        # keys only ever exist when nids.flows.aggregator.FlowAggregator
+        # put them there (see its docstring) -- never for source="api",
+        # since NSL-KDD has no IP field at all to have supplied one.
+        src_ip=str(raw_record["src_ip"]) if raw_record.get("src_ip") else None,
+        dst_ip=str(raw_record["dst_ip"]) if raw_record.get("dst_ip") else None,
     )
     for alert in alerts:
         save_alert(db_engine, prediction_id, alert, device_id=device_id)
@@ -181,6 +188,7 @@ def finish_record(
     source: str = "api",
     device_id: str | None = None,
     notify: Callable[[Alert], None] | None = None,
+    enrich: Callable[[list[str]], None] | None = None,
     metrics: Metrics | None = None,
 ) -> PredictResponse:
     """risk -> mitre -> alert -> optional persist -> response, given an
@@ -195,6 +203,19 @@ def finish_record(
     `nids.api.notifications.publish.schedule_alert_publish`); this
     module stays free of any bus/asyncio import, matching its own "pure
     orchestration" docstring.
+
+    `enrich`, if given, is called at most once, with the record's
+    routable IPv4 indicators (`nids.api.threat_intel.extract_indicators`
+    -- empty for `source="api"`, since NSL-KDD has no IP field at all;
+    see `nids.api.threat_intel`'s module docstring), but *only* when at
+    least one alert actually fired. Threat-intel enrichment is
+    investigative context for something already flagged, not a check run
+    against every flow -- the same "not every prediction, only the
+    alert-worthy ones" gating `nids.api.worker.explain_only_alert_worthy`
+    already applies for SHAP, applied here to conserve external provider
+    rate limits instead of compute. Never influences `alerts` above --
+    called after they're already decided, same ordering guarantee
+    `notify` gets.
 
     `metrics`, if given, gets `alerts_raised_total` incremented once per
     `Alert` actually generated, labeled with that alert's own `.source`
@@ -233,6 +254,11 @@ def finish_record(
             if meets_min_severity(alert.level, config.notification_min_severity):
                 notify(alert)
 
+    if enrich is not None and alerts:
+        indicators = extract_indicators(record)
+        if indicators:
+            enrich(indicators)
+
     if metrics is not None:
         for alert in alerts:
             metrics.alerts_raised_total.labels(source=alert.source).inc()
@@ -270,6 +296,7 @@ def process_record(
     source: str = "api",
     device_id: str | None = None,
     notify: Callable[[Alert], None] | None = None,
+    enrich: Callable[[list[str]], None] | None = None,
     metrics: Metrics | None = None,
 ) -> PredictResponse:
     """Run one raw record through the full pipeline: predict -> optional
@@ -295,5 +322,6 @@ def process_record(
         source=source,
         device_id=device_id,
         notify=notify,
+        enrich=enrich,
         metrics=metrics,
     )

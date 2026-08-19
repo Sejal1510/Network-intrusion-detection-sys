@@ -121,6 +121,19 @@ class ServingConfig:
     # channel isn't drowned in "low"/"medium" noise the moment it's
     # configured.
     notification_min_severity: str = "high"
+    # API keys for nids.api.threat_intel's IOC enrichment providers.
+    # Unset means that provider is never constructed (nids.api.threat_intel.
+    # build_providers) -- same "unset = feature off" convention as
+    # slack_webhook_url/smtp_* above. Neither set means
+    # nids.api.app never starts the enrichment dispatcher task at all.
+    abuseipdb_api_key: str | None = None
+    greynoise_api_key: str | None = None
+    # How long a cached nids.api.store ioc_enrichments row (keyed on
+    # indicator+provider) is trusted before a re-lookup is allowed. IP
+    # reputation doesn't meaningfully change minute-to-minute, so this
+    # defaults generously (24h) -- the point is avoiding repeated external
+    # lookups for the same indicator, not real-time freshness.
+    enrichment_cache_ttl_seconds: int = 86_400
 
     @property
     def run_dir(self) -> Path:

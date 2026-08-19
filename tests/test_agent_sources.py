@@ -64,7 +64,7 @@ async def test_live_source_yields_records_from_completed_connections():
             break
 
     assert len(records) == 1
-    assert set(records[0].keys()) == set(FEATURE_COLUMNS)
+    assert set(FEATURE_COLUMNS) <= set(records[0].keys())
     assert records[0]["flag"] == "REJ"
 
 
@@ -105,7 +105,7 @@ async def test_replay_source_records_satisfy_feature_columns_contract():
     records = [record async for record in source.records()]
 
     for record in records:
-        assert set(record.keys()) == set(FEATURE_COLUMNS)
+        assert set(FEATURE_COLUMNS) <= set(record.keys())
 
 
 async def test_replay_source_respects_speed_pacing():

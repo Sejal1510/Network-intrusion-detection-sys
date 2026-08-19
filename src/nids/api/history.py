@@ -27,18 +27,22 @@ from nids.api.schemas import (
     AlertHistoryResponse,
     AuditEventItem,
     AuditEventResponse,
+    EnrichmentListResponse,
+    EnrichmentResultResponse,
     PredictionHistoryItem,
     PredictionHistoryResponse,
 )
 from nids.api.store import (
     AlertRecordView,
     AuditEventView,
+    IocEnrichmentView,
     PredictionRecordView,
     acknowledge_alert,
     get_alert,
     get_prediction,
     list_alerts,
     list_audit_events,
+    list_enrichments_for_indicators,
     list_predictions,
     record_audit_event,
 )
@@ -107,6 +111,40 @@ def _to_alert_item(view: AlertRecordView) -> AlertHistoryItem:
         acknowledged=view.acknowledged,
         source=view.source,
     )
+
+
+def _enrichment_items_for(
+    view: PredictionRecordView, cached: list[IocEnrichmentView]
+) -> list[EnrichmentResultResponse]:
+    """One response row per (cached result, matching role) pair -- `view`
+    tells us which of `src_ip`/`dst_ip` this specific prediction actually
+    had; `cached` (from `nids.api.store.list_enrichments_for_indicators`)
+    is indicator-only and role-agnostic (see that function's docstring),
+    since the same IP's cached verdict is shared across every prediction
+    that ever referenced it. An indicator matching both roles (e.g. a
+    reflected/looped flow) gets one row per role, not silently merged."""
+    roles_by_indicator: dict[str, list[str]] = {}
+    if view.src_ip:
+        roles_by_indicator.setdefault(view.src_ip, []).append("src")
+    if view.dst_ip:
+        roles_by_indicator.setdefault(view.dst_ip, []).append("dst")
+
+    items: list[EnrichmentResultResponse] = []
+    for result in cached:
+        for role in roles_by_indicator.get(result.indicator, []):
+            items.append(
+                EnrichmentResultResponse(
+                    indicator=result.indicator,
+                    indicator_role=role,
+                    provider=result.provider,
+                    verdict=result.verdict,
+                    confidence=result.confidence,
+                    raw_response=result.raw_response,
+                    looked_up_at=result.looked_up_at,
+                    expires_at=result.expires_at,
+                )
+            )
+    return items
 
 
 def _to_audit_event_item(view: AuditEventView) -> AuditEventItem:
@@ -212,6 +250,50 @@ def acknowledge_alert_route(
         target_id=alert_id,
     )
     return _to_alert_item(view)
+
+
+@router.get("/predictions/{prediction_id}/enrichment", response_model=EnrichmentListResponse)
+def get_prediction_enrichment_route(
+    prediction_id: str, db_engine: DbEngineDep, _current_user: CurrentUserDep
+) -> EnrichmentListResponse:
+    """Whatever threat-intel is currently cached for this prediction's
+    `src_ip`/`dst_ip` (nids.api.threat_intel) -- an empty list is a valid,
+    normal response, not an error: it means either this prediction has no
+    routable IPv4 indicators at all (always true for source="api", see
+    `nids.api.store.PredictionRecord.src_ip`'s docstring) or enrichment
+    hasn't completed yet (dispatched asynchronously, see
+    `nids.api.threat_intel.dispatcher`). Only a nonexistent prediction id
+    is a 404."""
+    view = get_prediction(db_engine, prediction_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail=f"No prediction found with id {prediction_id!r}.")
+    indicators = [ip for ip in (view.src_ip, view.dst_ip) if ip]
+    cached = list_enrichments_for_indicators(db_engine, indicators)
+    return EnrichmentListResponse(items=_enrichment_items_for(view, cached))
+
+
+@router.get("/alerts/{alert_id}/enrichment", response_model=EnrichmentListResponse)
+def get_alert_enrichment_route(
+    alert_id: str, db_engine: DbEngineDep, _current_user: CurrentUserDep
+) -> EnrichmentListResponse:
+    """Thin convenience wrapper: resolves `alert.prediction_id`, then
+    returns exactly what `GET /history/predictions/{id}/enrichment`
+    would -- an indicator's reputation is a property of the flow (the
+    prediction), not of the alert raised about it, so this never
+    duplicates storage or logic, just the lookup path a dashboard already
+    sitting on an alert row would otherwise need a second round trip for."""
+    alert_view = get_alert(db_engine, alert_id)
+    if alert_view is None:
+        raise HTTPException(status_code=404, detail=f"No alert found with id {alert_id!r}.")
+    prediction_view = get_prediction(db_engine, alert_view.prediction_id)
+    if prediction_view is None:
+        # Shouldn't happen (alerts always reference a real prediction_id --
+        # PredictionRecord.alerts is cascade="all, delete-orphan"), but an
+        # orphaned alert should still 200 with no enrichment, not 500.
+        return EnrichmentListResponse(items=[])
+    indicators = [ip for ip in (prediction_view.src_ip, prediction_view.dst_ip) if ip]
+    cached = list_enrichments_for_indicators(db_engine, indicators)
+    return EnrichmentListResponse(items=_enrichment_items_for(prediction_view, cached))
 
 
 @router.get("/audit", response_model=AuditEventResponse)

@@ -277,6 +277,17 @@ class FlowAggregator:
         svc_hist_window = [*svc_hist, current]
 
         record = {
+            # Not NSL-KDD feature columns -- FeatureEngineer's
+            # ColumnTransformer selects only FEATURE_COLUMNS and silently
+            # drops anything else (sklearn's default `remainder="drop"`),
+            # so these ride along harmlessly to every consumer of this
+            # dict (validate_raw_records, predict_one, raw_record
+            # persistence) without ever reaching the model. Milestone 16
+            # threads them through nids.api.pipeline into
+            # PredictionRecord.src_ip/dst_ip for threat-intel enrichment;
+            # nothing before that milestone reads them.
+            "src_ip": state.orig_src_ip,
+            "dst_ip": host,
             "duration": state.last_time - state.start_time,
             "protocol_type": state.protocol,
             "service": service,

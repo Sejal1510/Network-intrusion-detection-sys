@@ -32,6 +32,7 @@ from nids.api.model_loader import ServedEnsemble
 from nids.api.notifications.publish import schedule_alert_publish
 from nids.api.pipeline import process_record
 from nids.api.risk import RiskScore
+from nids.api.threat_intel.publish import schedule_enrichment_publish
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,9 @@ async def process_flow_message(
             source="agent",
             device_id=device_id,
             notify=lambda alert: schedule_alert_publish(bus, asyncio.get_running_loop(), alert),
+            enrich=lambda indicators: schedule_enrichment_publish(
+                bus, asyncio.get_running_loop(), indicators
+            ),
             metrics=metrics,
         )
     except ValueError as exc:
